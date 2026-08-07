@@ -4624,6 +4624,7 @@ function _doProcessAutoLoad(fileArr){
   var cur=null, prev=null, completion=null, capfile=null, exportSched=null, worksheet=null;
   var wipFiles=[], sewingFiles=[], hoursDist=null, tpSummary=null;
   var capfiles=[], worksheetFiles=[];
+  window._seenCapKeys = {};  // reset per-call, avoid stale keys on reload
 
   fileArr.forEach(function(f){
     var n = f.name;
@@ -4637,8 +4638,11 @@ function _doProcessAutoLoad(fileArr){
     } else if(nl.indexOf('產能參數') >= 0 || nl.indexOf('productionplanning') >= 0
            || nl.indexOf('production planning') >= 0 || nl.indexOf('production_planning') >= 0
            || nl.indexOf('pp schedule') >= 0 || nl.indexOf('pp_schedule') >= 0){
-      capfile = f;  // primary (first factory); additional cap files are handled below
-      capfiles.push(f);
+      // 每個工廠只保留第一個（最新日期資料夾先下載）
+      var mkGuess = f.name.match(/GLD\d+/i);
+      var capKey = mkGuess ? mkGuess[0].toUpperCase() : f.name.substring(0, 12);
+      if(!capfile) capfile = f;
+      if(!(capKey in (window._seenCapKeys||{}))){ (window._seenCapKeys=window._seenCapKeys||{})[capKey]=1; capfiles.push(f); }
     } else if(nl.indexOf('dept_hours_production') >= 0){
       wipFiles.push(f);
     } else if(nl.indexOf('target_per_hari') >= 0 || nl.indexOf('targetperhari') >= 0){
@@ -4711,8 +4715,9 @@ function _doProcessAutoLoad(fileArr){
 
   // WIP: sort by date, older=A newer=B
   if(wipFiles.length >= 2){
-    handleWipFile(wipFiles[0], 'A'); markOk('WIP快照A：'+wipFiles[0].name);
-    handleWipFile(wipFiles[1], 'B'); markOk('WIP快照B：'+wipFiles[1].name);
+    var wLen = wipFiles.length;
+    handleWipFile(wipFiles[wLen-2], 'A'); markOk('WIP快照A：'+wipFiles[wLen-2].name);
+    handleWipFile(wipFiles[wLen-1], 'B'); markOk('WIP快照B：'+wipFiles[wLen-1].name);
   } else if(wipFiles.length === 1){
     handleWipFile(wipFiles[0], 'B'); markOk('WIP快照B：'+wipFiles[0].name);
     markSkip('WIP快照A');
