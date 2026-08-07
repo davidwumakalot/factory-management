@@ -2919,8 +2919,8 @@ function buildCompareChart(){
     data:{
       labels:allMonths.map(function(m){return m.replace(/^\d{4}-/,'');}),
       datasets:[
-        {label:'本週',data:curTotals,backgroundColor:'#1e3a8a',borderRadius:4,qtyIE:curTotalsQtyIE},
-        {label:'上週',data:prevTotals,backgroundColor:'#94a3b8',borderRadius:4,qtyIE:prevTotalsQtyIE}
+        {label:'上週',data:prevTotals,backgroundColor:'#94a3b8',borderRadius:4,qtyIE:prevTotalsQtyIE},
+        {label:'本週',data:curTotals,backgroundColor:'#1e3a8a',borderRadius:4,qtyIE:curTotalsQtyIE}
       ]
     },
     options:{
