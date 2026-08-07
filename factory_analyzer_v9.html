@@ -2881,6 +2881,39 @@ function buildCompareChart(){
       return s+p;
     },0);
   });
+  // 計算每月差異（本週 - 上週）
+  var deltas = allMonths.map(function(_,i){ return (curTotals[i]||0) - (prevTotals[i]||0); });
+
+  // 自訂 plugin：在每個月份柱上方畫差異數字
+  var deltaLabelPlugin = {
+    id: 'compareDeltas',
+    afterDatasetsDraw: function(chart){
+      var ctx = chart.ctx;
+      var meta0 = chart.getDatasetMeta(0); // 本週
+      var meta1 = chart.getDatasetMeta(1); // 上週
+      if(!meta0||!meta1) return;
+      allMonths.forEach(function(_,i){
+        var delta = deltas[i];
+        if(!delta) return;
+        // 取兩柱中較高那個的頂端 y 座標
+        var b0 = meta0.data[i], b1 = meta1.data[i];
+        if(!b0||!b1) return;
+        var topY = Math.min(b0.y, b1.y);
+        var centerX = (b0.x + b1.x) / 2;
+        var sign = delta > 0 ? '+' : '';
+        var label = sign + (Math.abs(delta)>=1000 ? Math.round(delta/1000)+'k' : delta.toLocaleString());
+        // 差異正負顏色
+        var color = delta > 0 ? '#16a34a' : '#dc2626';
+        ctx.save();
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.fillText(label, centerX, topY - 5);
+        ctx.restore();
+      });
+    }
+  };
+
   charts.compare=new Chart(document.getElementById('c-compare'),{
     type:'bar',
     data:{
@@ -2892,6 +2925,7 @@ function buildCompareChart(){
     },
     options:{
       responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:18}},
       plugins:{
         legend:{position:'top',labels:{font:{size:11}}},
         tooltip:{callbacks:{label:function(ctx){
@@ -2903,7 +2937,8 @@ function buildCompareChart(){
         x:{ticks:{autoSkip:false,maxRotation:45,font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}},
         y:{ticks:{callback:function(v){return v>=1000?Math.round(v/1000)+'k':v;},font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}}
       }
-    }
+    },
+    plugins:[deltaLabelPlugin]
   });
 }
 
@@ -4492,29 +4527,28 @@ async function loadFromServer(){
       }
       var index = await resp.json();
 
-      // 取最近 7 天有資料的日期（由新到舊）
-      var dates = Object.keys(index).sort().reverse().slice(0, 7);
-      if(!dates.length) throw new Error('index.json 中沒有資料，請先執行上傳腳本。');
+      // 只取最新 1 個日期資料夾（當日 run2.bat 已把所有檔案上傳到當日資料夾）
+      var allDates = Object.keys(index).sort().reverse();
+      if(!allDates.length) throw new Error('index.json 中沒有資料，請先執行上傳腳本。');
+      var newestDate = allDates[0];
+      var files = index[newestDate] || [];
+      if(!files.length) throw new Error('最新資料夾（' + newestDate + '）沒有檔案。');
 
       var fileArr = [];
-      var totalFiles = dates.reduce(function(s,d){ return s + (index[d]||[]).length; }, 0);
+      var totalFiles = files.length;
       var fetched = 0;
 
-      for(var di = 0; di < dates.length; di++){
-        var dateStr = dates[di];
-        var files   = index[dateStr] || [];
-        for(var fi = 0; fi < files.length; fi++){
-          var fname = files[fi];
-          fetched++;
-          if(btn) btn.textContent = '⏳ 下載中 ' + fetched + '/' + totalFiles + '...';
-          var fileUrl = baseUrl + 'data/' + dateStr + '/' + encodeURIComponent(fname) + ts;
-          try{
-            var fr = await fetch(fileUrl, {cache:'no-store'});
-            if(!fr.ok) continue;
-            var buf = await fr.arrayBuffer();
-            fileArr.push(new File([buf], fname, {type:'application/octet-stream'}));
-          }catch(e){ /* 跳過失敗的檔案 */ }
-        }
+      for(var fi = 0; fi < files.length; fi++){
+        var fname = files[fi];
+        fetched++;
+        if(btn) btn.textContent = '⏳ 下載中 ' + fetched + '/' + totalFiles + '...';
+        var fileUrl = baseUrl + 'data/' + newestDate + '/' + encodeURIComponent(fname) + ts;
+        try{
+          var fr = await fetch(fileUrl, {cache:'no-store'});
+          if(!fr.ok) continue;
+          var buf = await fr.arrayBuffer();
+          fileArr.push(new File([buf], fname, {type:'application/octet-stream'}));
+        }catch(e){ /* 跳過失敗的檔案 */ }
       }
 
       if(!fileArr.length) throw new Error('所有檔案下載失敗，請確認上傳腳本已成功執行。');
