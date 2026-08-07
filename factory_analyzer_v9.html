@@ -4623,9 +4623,9 @@ function _doProcessAutoLoad(fileArr){
     var n = f.name;
     var nl = n.toLowerCase();
     if(nl.indexOf('排單_本週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('本週') >= 0)){
-      cur = f;
+      if(!cur) cur = f;
     } else if(nl.indexOf('排單_上週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('上週') >= 0)){
-      prev = f;
+      if(!prev) prev = f;
     } else if(nl.indexOf('daily_all_factory_gld') >= 0 || nl.indexOf('daily all factory') >= 0){
       completion = f;
     } else if(nl.indexOf('產能參數') >= 0 || nl.indexOf('productionplanning') >= 0
