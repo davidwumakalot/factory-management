@@ -5703,10 +5703,18 @@ function renderEffTrendTab(){
       });
     });
     // Flat series (primary style only) for week-avg and big-% display
+    // series: use max per-style efficiency per day (pcs/jam÷std), fallback to prosentase
+    function maxPerStyleEff(ld){
+      if(!ld)return null;
+      var ps=ld.perStyle||{};
+      var vals=Object.keys(ps).map(function(k){return ps[k]||0;}).filter(function(v){return v>0;});
+      if(vals.length)return Math.max.apply(null,vals);
+      return ld.prosentase>0?ld.prosentase:null;
+    }
     var series=dates.map(function(d,di){
       var day=myDays[di];
       var ld=day&&day.lines[line];
-      return (ld&&ld.prosentase>0)?ld.prosentase:null;
+      return maxPerStyleEff(ld);
     });
     // Assign a color to each unique style across all days
     var stylePalette=['#3b82f6','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6'];
@@ -5718,7 +5726,8 @@ function renderEffTrendTab(){
     // Projected styles added after historical (new styles get next available palette color)
     // Will be populated after projStylePerDay is computed (see below after PP section)
 
-    var curPro=latestD.prosentase;
+    // curPro: use max per-style efficiency (pcs/jam÷std) instead of line-level prosentase
+    var curPro=maxPerStyleEff(latestD)||latestD.prosentase;
     // Weekly average efficiency
     var validSeries=series.filter(function(v){return v!==null;});
     var weekAvgPro=validSeries.length?validSeries.reduce(function(s,v){return s+v;},0)/validSeries.length:null;
