@@ -346,7 +346,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
         </div>
         <div class="chart-row">
           <div class="chart-card full">
-            <div class="chart-title">各月出口 PCS：本週 vs 上週（滑鼠移到柱狀圖上可同時看到標打數）</div>
+            <div class="chart-title">各月出口 PCS：上週 vs 本週（滑鼠移到柱狀圖上可同時看到標打數）</div>
             <div style="position:relative;height:280px"><canvas id="c-compare"></canvas></div>
           </div>
         </div>
@@ -2881,39 +2881,6 @@ function buildCompareChart(){
       return s+p;
     },0);
   });
-  // 計算每月差異（本週 - 上週）
-  var deltas = allMonths.map(function(_,i){ return (curTotals[i]||0) - (prevTotals[i]||0); });
-
-  // 自訂 plugin：在每個月份柱上方畫差異數字
-  var deltaLabelPlugin = {
-    id: 'compareDeltas',
-    afterDatasetsDraw: function(chart){
-      var ctx = chart.ctx;
-      var meta0 = chart.getDatasetMeta(0); // 本週
-      var meta1 = chart.getDatasetMeta(1); // 上週
-      if(!meta0||!meta1) return;
-      allMonths.forEach(function(_,i){
-        var delta = deltas[i];
-        if(!delta) return;
-        // 取兩柱中較高那個的頂端 y 座標
-        var b0 = meta0.data[i], b1 = meta1.data[i];
-        if(!b0||!b1) return;
-        var topY = Math.min(b0.y, b1.y);
-        var centerX = (b0.x + b1.x) / 2;
-        var sign = delta > 0 ? '+' : '';
-        var label = sign + (Math.abs(delta)>=1000 ? Math.round(delta/1000)+'k' : delta.toLocaleString());
-        // 差異正負顏色
-        var color = delta > 0 ? '#16a34a' : '#dc2626';
-        ctx.save();
-        ctx.font = 'bold 10px sans-serif';
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.fillText(label, centerX, topY - 5);
-        ctx.restore();
-      });
-    }
-  };
-
   charts.compare=new Chart(document.getElementById('c-compare'),{
     type:'bar',
     data:{
@@ -2925,7 +2892,6 @@ function buildCompareChart(){
     },
     options:{
       responsive:true,maintainAspectRatio:false,
-      layout:{padding:{top:18}},
       plugins:{
         legend:{position:'top',labels:{font:{size:11}}},
         tooltip:{callbacks:{label:function(ctx){
@@ -2938,7 +2904,52 @@ function buildCompareChart(){
         y:{ticks:{callback:function(v){return v>=1000?Math.round(v/1000)+'k':v;},font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}}
       }
     },
-    plugins:[deltaLabelPlugin]
+    plugins:[{
+      id:'diffLabels',
+      afterDraw:function(chart){
+        var c=chart.ctx;
+        var meta0=chart.getDatasetMeta(0); // 上週
+        var meta1=chart.getDatasetMeta(1); // 本週
+        var prevQ=chart.data.datasets[0].qtyIE||[];
+        var curQ=chart.data.datasets[1].qtyIE||[];
+        c.save();
+        c.textAlign='center';
+
+        // 標打數 label inside each bar
+        function drawInside(bars,qArr){
+          bars.forEach(function(bar,i){
+            var v=Math.round(qArr[i]||0);
+            if(!v)return;
+            var barH=bar.base-bar.y;
+            if(barH<14)return;
+            var lbl=v>=1000?Math.round(v/1000)+'k':v.toLocaleString();
+            c.font='bold 9px sans-serif';
+            c.textBaseline='middle';
+            c.fillStyle='rgba(255,255,255,0.92)';
+            c.fillText(lbl,bar.x,bar.y+barH/2);
+          });
+        }
+        drawInside(meta0.data,prevQ);
+        drawInside(meta1.data,curQ);
+
+        // 標打數 diff label above bar pair
+        c.font='bold 9.5px sans-serif';
+        c.textBaseline='alphabetic';
+        meta0.data.forEach(function(bar0,i){
+          var bar1=meta1.data[i];
+          if(!bar1)return;
+          var p=Math.round(prevQ[i]||0),cr=Math.round(curQ[i]||0);
+          if(!p&&!cr)return;
+          var diff=cr-p;
+          var abs=Math.abs(diff);
+          var fmt=abs>=1000000?(Math.round(abs/100000)/10)+'M':abs>=1000?Math.round(abs/1000)+'k':abs.toLocaleString();
+          var lbl=diff>0?('▲+'+fmt):diff<0?('▼-'+fmt):'－';
+          c.fillStyle=diff>0?'#16a34a':diff<0?'#dc2626':'#94a3b8';
+          c.fillText(lbl,(bar0.x+bar1.x)/2,Math.min(bar0.y,bar1.y)-5);
+        });
+        c.restore();
+      }
+    }]
   });
 }
 
@@ -4501,67 +4512,47 @@ function autoLoadFromFolder(){
 
 async function loadFromServer(){
   var btn = document.getElementById('btn-auto-load');
-  if(btn){ btn.disabled=true; btn.textContent='⏳ 載入中...'; }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ 從伺服器載入...'; }
 
-  // Wake Lock: prevent screen from locking during download
   var wakeLock = null;
   if('wakeLock' in navigator){
     try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
   }
 
-  var isGithubPages = window.location.hostname.indexOf('github.io') >= 0;
-
   try{
-    if(isGithubPages){
-      // ── GitHub Pages 模式：從 data/index.json 讀取可用檔案清單 ──
-      var basePath = window.location.pathname.replace(/\/[^\/]*$/, '/');
-      var baseUrl  = window.location.origin + basePath; // e.g. https://xxx.github.io/factory-management/
-      var ts = '?t=' + Date.now();
+    var isGH = window.location.hostname.indexOf('github.io') >= 0;
+    var ts = '?t=' + Date.now();
 
-      var resp = await fetch(baseUrl + 'data/index.json' + ts, {cache:'no-store'});
-      if(!resp.ok){
-        throw new Error(
-          '找不到最新資料（HTTP ' + resp.status + '）。\n' +
-          '請先在電腦執行 upload_to_github.py 上傳資料。'
-        );
-      }
-      var index = await resp.json();
-
-      // 只取最新 1 個日期資料夾（當日 run2.bat 已把所有檔案上傳到當日資料夾）
+    if(isGH){
+      // GitHub Pages mode: use index.json to find files; only load newest date folder
+      var indexUrl = window.location.origin + '/factory-management/data/index.json' + ts;
+      var idxResp = await fetch(indexUrl, {cache:'no-store'});
+      if(!idxResp.ok) throw new Error('index.json HTTP ' + idxResp.status);
+      var index = await idxResp.json();
       var allDates = Object.keys(index).sort().reverse();
-      if(!allDates.length) throw new Error('index.json 中沒有資料，請先執行上傳腳本。');
       var newestDate = allDates[0];
       var files = index[newestDate] || [];
-      if(!files.length) throw new Error('最新資料夾（' + newestDate + '）沒有檔案。');
-
-      var fileArr = [];
       var totalFiles = files.length;
-      var fetched = 0;
-
-      for(var fi = 0; fi < files.length; fi++){
-        var fname = files[fi];
-        fetched++;
-        if(btn) btn.textContent = '⏳ 下載中 ' + fetched + '/' + totalFiles + '...';
-        var fileUrl = baseUrl + 'data/' + newestDate + '/' + encodeURIComponent(fname) + ts;
+      if(!totalFiles) throw new Error('最新資料夾 '+newestDate+' 是空的');
+      var baseData = window.location.origin + '/factory-management/data/' + newestDate + '/';
+      var fileArr = [];
+      for(var i=0; i<files.length; i++){
+        if(btn) btn.textContent = '⏳ 下載中 '+(i+1)+'/'+totalFiles+'...';
         try{
-          var fr = await fetch(fileUrl, {cache:'no-store'});
+          var fr = await fetch(baseData + encodeURIComponent(files[i]) + ts, {cache:'no-store'});
           if(!fr.ok) continue;
           var buf = await fr.arrayBuffer();
-          fileArr.push(new File([buf], fname, {type:'application/octet-stream'}));
-        }catch(e){ /* 跳過失敗的檔案 */ }
+          fileArr.push(new File([buf], files[i], {type:'application/octet-stream'}));
+        }catch(e){ /* skip */ }
       }
-
-      if(!fileArr.length) throw new Error('所有檔案下載失敗，請確認上傳腳本已成功執行。');
+      if(!fileArr.length) throw new Error('所有檔案下載失敗');
       _doProcessAutoLoad(fileArr);
-
     } else {
-      // ── 本地 Python Server 模式（原邏輯） ──
+      // Local Python http.server mode: parse directory listing HTML
       var baseUrl = window.location.origin + '/';
-      var ts = '?t=' + Date.now();
       var resp = await fetch(baseUrl + ts, {cache:'no-store'});
       if(!resp.ok) throw new Error('HTTP ' + resp.status);
       var html = await resp.text();
-
       var parser = new DOMParser();
       var doc = parser.parseFromString(html, 'text/html');
       var xlsxLinks = [];
@@ -4571,47 +4562,37 @@ async function loadFromServer(){
           xlsxLinks.push({url: baseUrl + href, name: decodeURIComponent(href)});
         }
       });
-
       if(!xlsxLinks.length){
         showAutoLoadResult('⚠ 伺服器目錄沒有找到 Excel 檔案。\n請確認 start_server.py 是從週報資料夾啟動的。');
         return;
       }
-
       var fileArr = [];
-      for(var i = 0; i < xlsxLinks.length; i++){
-        if(btn) btn.textContent = '⏳ 下載中 ' + (i+1) + '/' + xlsxLinks.length + '...';
+      for(var i=0; i<xlsxLinks.length; i++){
+        if(btn) btn.textContent = '⏳ 下載中 '+(i+1)+'/'+xlsxLinks.length+'...';
         try{
           var fr = await fetch(xlsxLinks[i].url + ts, {cache:'no-store'});
           if(!fr.ok) continue;
           var buf = await fr.arrayBuffer();
           fileArr.push(new File([buf], xlsxLinks[i].name, {type:'application/octet-stream'}));
-        }catch(e){ /* skip unreadable files */ }
+        }catch(e){ /* skip */ }
       }
-
       if(!fileArr.length){ showAutoLoadResult('⚠ 所有 Excel 檔案下載失敗'); return; }
       _doProcessAutoLoad(fileArr);
     }
-
   }catch(e){
-    showAutoLoadResult('❌ 載入失敗：' + e.message);
+    showAutoLoadResult('❌ 從伺服器載入失敗：' + e.message);
   }finally{
     if(wakeLock){ try{ wakeLock.release(); }catch(e){} }
-    if(btn){
-      btn.disabled = false;
-      btn.textContent = isGithubPages ? '⚡ 重新載入最新資料' : '⚡ 從伺服器自動載入';
-    }
+    if(btn){ btn.disabled=false; btn.textContent= window.location.protocol!=='file:' ? '⚡ 從伺服器自動載入' : '⚡ 自動載入資料夾'; }
   }
 }
 
-// 更新按鈕文字，並在 GitHub Pages 上自動觸發載入
+// Update button label when running via HTTP
 (function(){
   if(window.location.protocol !== 'file:'){
     document.addEventListener('DOMContentLoaded', function(){
       var btn = document.getElementById('btn-auto-load');
-      var isGH = window.location.hostname.indexOf('github.io') >= 0;
-      if(btn) btn.textContent = isGH ? '⚡ 重新載入最新資料' : '⚡ 從伺服器自動載入';
-      // GitHub Pages：頁面開啟後自動載入最新資料
-      if(isGH){ setTimeout(loadFromServer, 800); }
+      if(btn) btn.textContent = '⚡ 從伺服器自動載入';
     });
   }
 })();
@@ -4658,24 +4639,27 @@ function _doProcessAutoLoad(fileArr){
   var cur=null, prev=null, completion=null, capfile=null, exportSched=null, worksheet=null;
   var wipFiles=[], sewingFiles=[], hoursDist=null, tpSummary=null;
   var capfiles=[], worksheetFiles=[];
-  window._seenCapKeys = {};  // reset per-call, avoid stale keys on reload
+  window._seenCapKeys = {}; // reset per-call to avoid stale keys on reload
+
+  // Sort newest-first so first match = newest file
+  fileArr.sort(function(a,b){ return a.name < b.name ? 1 : a.name > b.name ? -1 : 0; });
 
   fileArr.forEach(function(f){
     var n = f.name;
     var nl = n.toLowerCase();
     if(nl.indexOf('排單_本週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('本週') >= 0)){
-      if(!cur) cur = f;  // 只保留第一個（最新日期資料夾先下載）
+      if(!cur) cur = f; // first match = newest (files sorted newest-first)
     } else if(nl.indexOf('排單_上週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('上週') >= 0)){
-      if(!prev) prev = f;  // 只保留第一個
+      if(!prev) prev = f;
     } else if(nl.indexOf('daily_all_factory_gld') >= 0 || nl.indexOf('daily all factory') >= 0){
       completion = f;
     } else if(nl.indexOf('產能參數') >= 0 || nl.indexOf('productionplanning') >= 0
            || nl.indexOf('production planning') >= 0 || nl.indexOf('production_planning') >= 0
            || nl.indexOf('pp schedule') >= 0 || nl.indexOf('pp_schedule') >= 0){
-      // 每個工廠只保留第一個（最新日期資料夾先下載）
+      if(!capfile) capfile = f; // primary
+      // Dedup by factory key — only keep first (newest) file per factory
       var mkGuess = f.name.match(/GLD\d+/i);
       var capKey = mkGuess ? mkGuess[0].toUpperCase() : f.name.substring(0, 12);
-      if(!capfile) capfile = f;
       if(!(capKey in (window._seenCapKeys||{}))){ (window._seenCapKeys=window._seenCapKeys||{})[capKey]=1; capfiles.push(f); }
     } else if(nl.indexOf('dept_hours_production') >= 0){
       wipFiles.push(f);
@@ -4747,10 +4731,11 @@ function _doProcessAutoLoad(fileArr){
     simulateLoad('fi-worksheet', worksheet, handleWorksheetFile);
   }
 
-  // WIP: sort by date, older=A newer=B
+  // WIP: A = oldest (上週), B = newest (昨天)
+  wipFiles.sort(function(a,b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
   if(wipFiles.length >= 2){
     var wLen = wipFiles.length;
-    handleWipFile(wipFiles[wLen-2], 'A'); markOk('WIP快照A：'+wipFiles[wLen-2].name);
+    handleWipFile(wipFiles[0], 'A'); markOk('WIP快照A：'+wipFiles[0].name);
     handleWipFile(wipFiles[wLen-1], 'B'); markOk('WIP快照B：'+wipFiles[wLen-1].name);
   } else if(wipFiles.length === 1){
     handleWipFile(wipFiles[0], 'B'); markOk('WIP快照B：'+wipFiles[0].name);
@@ -5530,7 +5515,7 @@ function handleEffTrendFile(file){
 
     // Auto-detect column indices by scanning for header row
     // Default fallback indices (known good for standard format)
-    var colTarget=3,colJkk=4,colPcsJam=5,colPro=6,colPersons=8,colIe=9;
+    var colTarget=3,colJkk=4,colPcsJam=5,colPro=6,colPersons=8,colIe=9,colStd=-1;
     var headerRowIdx=3; // default: data starts at row 4 (idx 4)
     for(var hr=0;hr<Math.min(8,aoa.length);hr++){
       var hrow=aoa[hr];
@@ -5544,6 +5529,7 @@ function handleEffTrendFile(file){
         else if(hv==='PROSENTASE'||hv==='PROSENTASI'||hv==='%'&&hc>4)colPro=hc;
         else if(hv==='PERSONS'||hv==='ORANG'||hv==='PEOPLE'||hv==='MANPOWER')colPersons=hc;
         else if(hv==='IE')colIe=hc;
+        else if(hv==='STD OUTPUT'||hv==='STD'||hv==='STANDARD OUTPUT'||hv==='STD_OUTPUT')colStd=hc;
       }
       // If this row has 'JKK' or 'Prosentase', it's the header — data starts next row
       var hasHeader=hrow.some(function(c){
@@ -5576,12 +5562,16 @@ function handleEffTrendFile(file){
       var prosentase=parseFloat(row[colPro])||0;
       var persons   =parseFloat(row[colPersons])||0;
       var ie        =parseFloat(row[colIe])||0;
+      var stdOutput =colStd>=0&&row[colStd]!=null?parseFloat(row[colStd])||0:0;
+      // Per-style efficiency: pcs/jam ÷ STD output
+      // Falls back to file's prosentase if STD output column not present or zero
+      var styleEff=(stdOutput>0&&pcsJam>0)?(pcsJam/stdOutput):prosentase;
 
       // Sanity check: reject obviously wrong values to guard against misidentified files
       if(jkk>24||prosentase>5||persons>300||(jkk>0&&jkk<1))continue;
 
       if(!lineData[curLine]){
-        // First (main) row for this line — has JKK
+        // First row for this line
         lineData[curLine]={
           primaryStyle:styleVal,
           prosentase:prosentase,
@@ -5593,17 +5583,20 @@ function handleEffTrendFile(file){
           allStyles:[styleVal],
           perStyle:{}
         };
-        lineData[curLine].perStyle[styleVal]=prosentase;
+        // Only record efficiency if style is actually producing (styleEff > 0)
+        // Rows with JKK=0/null & no output are scheduling placeholders — skip
+        if(styleEff>0) lineData[curLine].perStyle[styleVal]=styleEff;
       } else {
         // Additional row for this line (换款 overlap OR same style with different IE)
         lineData[curLine].allStyles.push(styleVal);
         lineData[curLine].totalTarget+=target;
         lineData[curLine].pcsJam+=pcsJam;
-        // For perStyle: keep max prosentase — sub-rows with null IE often have null prosentase
-        var _prevPro=lineData[curLine].perStyle[styleVal];
-        var _prevVal=(_prevPro!==null&&_prevPro!==undefined)?_prevPro:0;
-        var _newVal=prosentase||0;
-        lineData[curLine].perStyle[styleVal]=(_newVal>_prevVal)?_newVal:_prevVal;
+        // Only record if style has actual production; keep max for same-style multi-IE sub-rows
+        if(styleEff>0){
+          var _prevPro=lineData[curLine].perStyle[styleVal];
+          var _prevVal=(_prevPro!=null)?_prevPro:0;
+          if(styleEff>_prevVal) lineData[curLine].perStyle[styleVal]=styleEff;
+        }
         // Promote to primary if this style has higher JKK (more active)
         if(jkk>lineData[curLine].jkk){
           lineData[curLine].prosentase=prosentase;
@@ -5701,8 +5694,8 @@ function renderEffTrendTab(){
       var ld=day&&day.lines[line];
       if(!ld)return;
       var src=ld.perStyle&&Object.keys(ld.perStyle).length?ld.perStyle:{};
-      // backward compat: if no perStyle, synthesize from primaryStyle
-      if(!Object.keys(src).length&&ld.primaryStyle){src={};src[ld.primaryStyle]=ld.prosentase;}
+      // backward compat: if no perStyle, synthesize from primaryStyle (only if prosentase > 0)
+      if(!Object.keys(src).length&&ld.primaryStyle&&ld.prosentase>0){src={};src[ld.primaryStyle]=ld.prosentase;}
       Object.keys(src).forEach(function(sty){
         if(!histStyleSeries[sty])histStyleSeries[sty]=new Array(dates.length).fill(null);
         var v=src[sty];
