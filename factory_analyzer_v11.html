@@ -2651,20 +2651,23 @@ function renderCpoProgTab(){
     '<a href="javascript:void(0)" onclick="cpoProgCollapseAll()" style="color:#1e3a8a;text-decoration:underline">全部收合</a></div>';
   cpoProgLastShown=shown; // used by the "全部展開" link above (avoids re-serializing the array into the onclick attribute)
 
-  // This table inherits the app-wide `table{table-layout:fixed}` rule, which sizes EVERY column
-  // to the width given on the header row's <th> cells (later rows' widths are ignored under fixed
+  // This table inherits the app-wide `table{table-layout:fixed}` rule, which sizes EVERY column to
+  // the width given on the header row's <th> cells (later rows' widths are ignored under fixed
   // layout) — with no widths specified, all columns default to equal width, which was too narrow
-  // for the CUTTING/RECEIVING/PACKING progress-bar cells (track+%+delta need ~170px) and caused the
-  // value printed inside the bar to visually clip. Explicit widths below are proportional targets;
-  // the browser scales them to fill the table's 100% width while keeping these ratios, so 款式 and
-  // the three progress columns get the space they actually need instead of an equal 1/9th slice.
-  var theadHtml='<tr><th class="left" style="width:60px">工廠</th><th class="left" style="width:70px">客戶</th>'+
-    '<th class="left" style="width:150px">款式</th><th class="left" style="width:70px">顏色</th>'+
-    '<th style="width:130px">Exp Date</th><th style="width:85px">CPO數量</th>'+
-    '<th style="width:160px"><span class="sw" style="background:#3b82f6"></span>Cutting</th>'+
-    '<th style="width:160px"><span class="sw" style="background:#f59e0b"></span>Receiving</th>'+
-    '<th style="width:160px"><span class="sw" style="background:#16a34a"></span>Packing</th>'+
-    (showProjection?'<th class="left" style="width:170px">能否如期完成</th>':'')+
+  // for the CUTTING/RECEIVING/PACKING progress-bar cells and clipped the value inside the bar.
+  // cutting/receiving/packing must each fit: track(92) + gap(6) + pct(38) + gap(6) + delta
+  // margin-left(3) + delta(46) = 191px of flex content, plus the cell's own 10px padding (5+5) =
+  // 201px minimum — 200px below was one earlier attempt that came in just short of that and still
+  // clipped; 210px leaves a small margin. Defined once here (not duplicated into a separate
+  // min-width constant) so the header and the table's overall min-width below can never drift apart.
+  var cpoColWidths = {maker:60,cust:70,style:150,color:70,expDate:130,cpoQty:85,cutting:210,receiving:210,packing:210,projection:200};
+  var theadHtml='<tr><th class="left" style="width:'+cpoColWidths.maker+'px">工廠</th><th class="left" style="width:'+cpoColWidths.cust+'px">客戶</th>'+
+    '<th class="left" style="width:'+cpoColWidths.style+'px">款式</th><th class="left" style="width:'+cpoColWidths.color+'px">顏色</th>'+
+    '<th style="width:'+cpoColWidths.expDate+'px">Exp Date</th><th style="width:'+cpoColWidths.cpoQty+'px">CPO數量</th>'+
+    '<th style="width:'+cpoColWidths.cutting+'px"><span class="sw" style="background:#3b82f6"></span>Cutting</th>'+
+    '<th style="width:'+cpoColWidths.receiving+'px"><span class="sw" style="background:#f59e0b"></span>Receiving</th>'+
+    '<th style="width:'+cpoColWidths.packing+'px"><span class="sw" style="background:#16a34a"></span>Packing</th>'+
+    (showProjection?('<th class="left" style="width:'+cpoColWidths.projection+'px">能否如期完成</th>'):'')+
     '</tr>';
   var todayMs=new Date(new Date().toDateString()).getTime();
   var bodyHtml=shown.map(function(g){
@@ -2704,10 +2707,13 @@ function renderCpoProgTab(){
     }
     return headRow+detailRows;
   }).join('');
-  // min-width matches the sum of the target widths set on theadHtml's <th> cells above (keeps them
-  // in sync: if those change, this should too) — guarantees table-layout:fixed never has to shrink
-  // the progress-bar columns below what they need, regardless of window/panel width.
-  var cpoTableMinWidth = showProjection ? 1215 : 1045;
+  // Sums the SAME cpoColWidths object used to build theadHtml above, so this can never drift out of
+  // sync with the header widths the way a separately hand-maintained constant could — guarantees
+  // table-layout:fixed never has to shrink the progress-bar columns below what they need, regardless
+  // of window/panel width.
+  var cpoTableMinWidth = cpoColWidths.maker+cpoColWidths.cust+cpoColWidths.style+cpoColWidths.color+
+    cpoColWidths.expDate+cpoColWidths.cpoQty+cpoColWidths.cutting+cpoColWidths.receiving+cpoColWidths.packing+
+    (showProjection?cpoColWidths.projection:0);
   document.getElementById('cpoprog-rows').innerHTML = groups.length ?
     ('<div class="cpoprog-tablewrap"><table style="min-width:'+cpoTableMinWidth+'px"><thead>'+theadHtml+'</thead><tbody>'+bodyHtml+'</tbody></table></div>'+
      '<div class="row-count">顯示 '+shown.length.toLocaleString()+' / '+groups.length.toLocaleString()+' 款'+(mk?'（工廠：'+mk+'）':'')+'</div>') :
