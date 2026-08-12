@@ -60,6 +60,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft J
 .dl-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .dl-sep{width:1px;height:20px;background:var(--border)}
 .table-wrap{overflow:hidden;border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+/* Like .table-wrap, but scrolls horizontally instead of clipping. table-layout:fixed (see `table`
+   below) never lets a column grow past what its header <th> is given — on a narrow window/panel the
+   CUTTING/RECEIVING/PACKING cells (track+%+delta, ~170px needed) would get less than that and the
+   value inside the bar gets cut off. A min-width on the table (set inline per-render, see
+   renderCpoProgTab) plus overflow-x:auto here means the table keeps its needed width and the wrapper
+   scrolls sideways instead, so nothing is ever silently clipped. */
+.cpoprog-tablewrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px;table-layout:fixed}
 thead th{background:#1e3a8a;color:#fff;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.03em;padding:8px 5px;text-align:right;border-bottom:2px solid #1e40af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:sticky;top:0;cursor:pointer;user-select:none;z-index:2}
 thead th.left{text-align:left}
@@ -155,8 +162,16 @@ tr.cpoprog-grp-row{cursor:pointer}
 tr.cpoprog-grp-row:hover td{background:#1e40af!important}
 .cpoprog-caret{display:inline-block;width:11px;font-size:10px}
 tr.sub td{cursor:default}
-.cpoprog-delta{font-size:10px;font-weight:700;color:#dc2626;margin-left:3px;white-space:nowrap}
+.cpoprog-delta{font-size:9px;font-weight:600;color:#dc2626;margin-left:3px;white-space:nowrap;display:inline-block;width:46px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;text-align:left}
 tr.grp .cpoprog-delta{color:#fecaca}
+/* Cap the left text columns (工廠/客戶/款式/顏色) so long style codes/customer names don't eat the
+   width the CUTTING/RECEIVING/PACKING progress-bar columns need — without this, those bars (and the
+   value printed inside them) get squeezed and the numbers clip. Full text stays available via the
+   title tooltip added on these cells. */
+#cpoprog-rows table td:nth-child(1){max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#cpoprog-rows table td:nth-child(2){max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#cpoprog-rows table td:nth-child(3){max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#cpoprog-rows table td:nth-child(4){max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #hours-dist-tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:start}
 .dist-dept-block{margin-bottom:0}
 .dist-dept-block table{min-width:0;font-size:11px}
@@ -2297,14 +2312,22 @@ function cpoProgCellHtml(val,order,cls,deltaVal){
   var ord=Math.max(order,1);
   var pct=val/ord*100;
   var fillPct=Math.min(100,Math.max(0,pct));
-  var deltaHtml='';
+  // Delta text (+123/-45) is optional per row, but the <span> itself is always rendered at a fixed
+  // width (see .cpoprog-delta CSS: width, not max-width) — even empty — so every row in the same
+  // column reserves identical total width. Without this, rows with a delta vs rows without would
+  // make the table auto-size the column to the widest row, and since .wip-mini-cell right-aligns its
+  // content (justify-content:flex-end), the progress bar itself would visibly shift/jump left-right
+  // between rows depending on whether that row happens to have a delta.
+  var deltaText='', deltaTitleAttr='';
   if(deltaVal!==null&&deltaVal!==undefined){
     var dv=Math.round(deltaVal);
     if(dv!==0){
       var sign=dv>0?'+':'';
-      deltaHtml='<span class="cpoprog-delta" title="較昨天'+(dv>0?'增加':'減少')+' '+Math.abs(dv).toLocaleString()+'">'+sign+dv.toLocaleString()+'</span>';
+      deltaText=sign+dv.toLocaleString();
+      deltaTitleAttr=' title="較昨天'+(dv>0?'增加':'減少')+' '+Math.abs(dv).toLocaleString()+'"';
     }
   }
+  var deltaHtml='<span class="cpoprog-delta"'+deltaTitleAttr+'>'+deltaText+'</span>';
   return '<td><div class="wip-mini-cell" title="'+Math.round(val).toLocaleString()+' / '+Math.round(order).toLocaleString()+'">'+
     '<div class="wip-mini-track"><div class="wip-mini-fill '+cls+'" style="width:'+fillPct.toFixed(2)+'%"></div>'+
     '<span class="wip-mini-track-label">'+Math.round(val).toLocaleString()+'</span></div>'+
@@ -2628,11 +2651,20 @@ function renderCpoProgTab(){
     '<a href="javascript:void(0)" onclick="cpoProgCollapseAll()" style="color:#1e3a8a;text-decoration:underline">全部收合</a></div>';
   cpoProgLastShown=shown; // used by the "全部展開" link above (avoids re-serializing the array into the onclick attribute)
 
-  var theadHtml='<tr><th class="left">工廠</th><th class="left">客戶</th><th class="left">款式</th><th class="left">顏色</th><th>Exp Date</th><th>CPO數量</th>'+
-    '<th><span class="sw" style="background:#3b82f6"></span>Cutting</th>'+
-    '<th><span class="sw" style="background:#f59e0b"></span>Receiving</th>'+
-    '<th><span class="sw" style="background:#16a34a"></span>Packing</th>'+
-    (showProjection?'<th class="left">能否如期完成</th>':'')+
+  // This table inherits the app-wide `table{table-layout:fixed}` rule, which sizes EVERY column
+  // to the width given on the header row's <th> cells (later rows' widths are ignored under fixed
+  // layout) — with no widths specified, all columns default to equal width, which was too narrow
+  // for the CUTTING/RECEIVING/PACKING progress-bar cells (track+%+delta need ~170px) and caused the
+  // value printed inside the bar to visually clip. Explicit widths below are proportional targets;
+  // the browser scales them to fill the table's 100% width while keeping these ratios, so 款式 and
+  // the three progress columns get the space they actually need instead of an equal 1/9th slice.
+  var theadHtml='<tr><th class="left" style="width:60px">工廠</th><th class="left" style="width:70px">客戶</th>'+
+    '<th class="left" style="width:150px">款式</th><th class="left" style="width:70px">顏色</th>'+
+    '<th style="width:130px">Exp Date</th><th style="width:85px">CPO數量</th>'+
+    '<th style="width:160px"><span class="sw" style="background:#3b82f6"></span>Cutting</th>'+
+    '<th style="width:160px"><span class="sw" style="background:#f59e0b"></span>Receiving</th>'+
+    '<th style="width:160px"><span class="sw" style="background:#16a34a"></span>Packing</th>'+
+    (showProjection?'<th class="left" style="width:170px">能否如期完成</th>':'')+
     '</tr>';
   var todayMs=new Date(new Date().toDateString()).getTime();
   var bodyHtml=shown.map(function(g){
@@ -2642,9 +2674,9 @@ function renderCpoProgTab(){
     var groupOverdue = g.minExpMs!==null && g.minExpMs<todayMs && g.packing<g.cpoQty-0.5;
     var projCell=showProjection?('<td class="left">'+cpoProgProjectionBadgeHtml(g.projection)+'</td>'):'';
     var headRow='<tr class="grp cpoprog-grp-row" onclick="toggleCpoProgGroup(\''+escJsStr(g.key)+'\')" title="點擊展開／收合 顏色×Exp Date 明細">'+
-      '<td class="left">'+g.maker+'</td>'+
-      '<td class="left">'+g.cust+'</td>'+
-      '<td class="left"><span class="cpoprog-caret">'+(open?'▾':'▸')+'</span> '+g.style+'</td>'+
+      '<td class="left" title="'+escHtml(g.maker)+'">'+g.maker+'</td>'+
+      '<td class="left" title="'+escHtml(g.cust)+'">'+g.cust+'</td>'+
+      '<td class="left" title="'+escHtml(g.style)+'"><span class="cpoprog-caret">'+(open?'▾':'▸')+'</span> '+g.style+'</td>'+
       '<td class="left">'+g.colorCount+' 色</td>'+
       '<td'+(groupOverdue?' style="color:#fca5a5;font-weight:700"':'')+' title="'+expRangeLabel+(groupOverdue?'（最早的Exp Date已逾期尚未出貨完成）':'')+'">'+expRangeLabel+'</td>'+
       '<td>'+Math.round(g.cpoQty).toLocaleString()+'</td>'+
@@ -2659,8 +2691,8 @@ function renderCpoProgTab(){
         var overdue = d.expMs!==null && d.expMs<todayMs && d.packing<d.cpoQty-0.5;
         return '<tr class="sub">'+
           '<td></td><td></td>'+
-          '<td class="left" style="padding-left:20px;color:#94a3b8">'+g.style+'</td>'+
-          '<td class="left">'+(d.color||'(無顏色)')+'</td>'+
+          '<td class="left" style="padding-left:20px;color:#94a3b8" title="'+escHtml(g.style)+'">'+g.style+'</td>'+
+          '<td class="left" title="'+escHtml(d.color||'(無顏色)')+'">'+(d.color||'(無顏色)')+'</td>'+
           '<td'+(overdue?' style="color:#dc2626;font-weight:700" title="已逾期尚未出貨完成"':'')+'>'+(formatCpoExpDate(d.expDate,d.expMs)||'-')+'</td>'+
           '<td>'+Math.round(d.cpoQty).toLocaleString()+'</td>'+
           cpoProgCellHtml(d.cutting,d.cpoQty,'cut',d.deltaCutting)+
@@ -2672,8 +2704,12 @@ function renderCpoProgTab(){
     }
     return headRow+detailRows;
   }).join('');
+  // min-width matches the sum of the target widths set on theadHtml's <th> cells above (keeps them
+  // in sync: if those change, this should too) — guarantees table-layout:fixed never has to shrink
+  // the progress-bar columns below what they need, regardless of window/panel width.
+  var cpoTableMinWidth = showProjection ? 1215 : 1045;
   document.getElementById('cpoprog-rows').innerHTML = groups.length ?
-    ('<div class="table-wrap"><table><thead>'+theadHtml+'</thead><tbody>'+bodyHtml+'</tbody></table></div>'+
+    ('<div class="cpoprog-tablewrap"><table style="min-width:'+cpoTableMinWidth+'px"><thead>'+theadHtml+'</thead><tbody>'+bodyHtml+'</tbody></table></div>'+
      '<div class="row-count">顯示 '+shown.length.toLocaleString()+' / '+groups.length.toLocaleString()+' 款'+(mk?'（工廠：'+mk+'）':'')+'</div>') :
     '<div style="text-align:center;padding:2rem;color:#64748b">沒有符合條件的資料</div>';
 }
@@ -5447,14 +5483,25 @@ function _doProcessAutoLoad(fileArr){
     markSkip('WIP快照A'); markSkip('WIP快照B');
   }
 
-  // CPO生產進度：A = 較舊（昨天，用於比較增量）, B = 較新（今天）
-  cpoprogFiles.sort(function(a,b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
-  if(cpoprogFiles.length >= 2){
-    var cpLen = cpoprogFiles.length;
-    handleCpoProgFile(cpoprogFiles[0], 'A'); markOk('CPO生產進度快照A：'+cpoprogFiles[0].name);
-    handleCpoProgFile(cpoprogFiles[cpLen-1], 'B'); markOk('CPO生產進度快照B：'+cpoprogFiles[cpLen-1].name);
-  } else if(cpoprogFiles.length === 1){
-    handleCpoProgFile(cpoprogFiles[0], 'B'); markOk('CPO生產進度快照B：'+cpoprogFiles[0].name);
+  // CPO生產進度：A = 較舊（昨天，用於比較增量）, B = 較新（今天）。
+  // outlook_fetcher.py 存檔時會把「今天／昨天」字樣直接寫進檔名（例如
+  // "CPO生產進度_今天_Daily All FIFO_COLOR_SIZE.csv"）——優先用這個標籤判斷，因為按檔名字母排序
+  //並不可靠：中文的「今」在Unicode順序上排在「昨」前面，字母排序會把"今天"誤判成較舊的A、"昨天"
+  // 誤判成較新的B，兩份快照就會整個對調。找不到標籤時（例如手動上傳、或舊版檔名）才退回用檔名排序。
+  var cpoA=null, cpoB=null;
+  var cpoTodayFiles = cpoprogFiles.filter(function(f){ return f.name.indexOf('今天') >= 0; });
+  var cpoYestFiles = cpoprogFiles.filter(function(f){ return f.name.indexOf('昨天') >= 0; });
+  if(cpoTodayFiles.length && cpoYestFiles.length){
+    cpoB = cpoTodayFiles[0]; cpoA = cpoYestFiles[0];
+  } else if(cpoprogFiles.length){
+    var cpoSorted = cpoprogFiles.slice().sort(function(a,b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+    cpoA = cpoSorted[0]; cpoB = cpoSorted[cpoSorted.length-1];
+  }
+  if(cpoA && cpoB && cpoA!==cpoB){
+    handleCpoProgFile(cpoA, 'A'); markOk('CPO生產進度快照A：'+cpoA.name);
+    handleCpoProgFile(cpoB, 'B'); markOk('CPO生產進度快照B：'+cpoB.name);
+  } else if(cpoB || cpoA){
+    handleCpoProgFile(cpoB||cpoA, 'B'); markOk('CPO生產進度快照B：'+(cpoB||cpoA).name);
     markSkip('CPO生產進度快照A');
   } else {
     markSkip('CPO生產進度快照A'); markSkip('CPO生產進度快照B');
