@@ -2661,12 +2661,21 @@ function renderCpoProgTab(){
   // clipped; 210px leaves a small margin. Defined once here (not duplicated into a separate
   // min-width constant) so the header and the table's overall min-width below can never drift apart.
   var cpoColWidths = {maker:60,cust:70,style:150,color:70,expDate:130,cpoQty:85,cutting:210,receiving:210,packing:210,projection:200};
+  // Show each column's total delta right in the (sticky) header, not just in the #cpoprog-summary
+  // line above the table — that line scrolls out of view once you scroll down through many rows,
+  // while the header stays pinned (thead th has position:sticky;top:0), so this keeps "今天比昨天"
+  // visible no matter how far down the list you've scrolled.
+  function cpoHeadDeltaHtml(v){
+    if(!hasSnapA)return '';
+    var r=Math.round(v);
+    return '<div style="font-size:9px;font-weight:400;text-transform:none;letter-spacing:0;color:#fca5a5;margin-top:2px">'+(r>0?'+':'')+r.toLocaleString()+'</div>';
+  }
   var theadHtml='<tr><th class="left" style="width:'+cpoColWidths.maker+'px">工廠</th><th class="left" style="width:'+cpoColWidths.cust+'px">客戶</th>'+
     '<th class="left" style="width:'+cpoColWidths.style+'px">款式</th><th class="left" style="width:'+cpoColWidths.color+'px">顏色</th>'+
     '<th style="width:'+cpoColWidths.expDate+'px">Exp Date</th><th style="width:'+cpoColWidths.cpoQty+'px">CPO數量</th>'+
-    '<th style="width:'+cpoColWidths.cutting+'px"><span class="sw" style="background:#3b82f6"></span>Cutting</th>'+
-    '<th style="width:'+cpoColWidths.receiving+'px"><span class="sw" style="background:#f59e0b"></span>Receiving</th>'+
-    '<th style="width:'+cpoColWidths.packing+'px"><span class="sw" style="background:#16a34a"></span>Packing</th>'+
+    '<th style="width:'+cpoColWidths.cutting+'px"><span class="sw" style="background:#3b82f6"></span>Cutting'+cpoHeadDeltaHtml(sumDeltaCut)+'</th>'+
+    '<th style="width:'+cpoColWidths.receiving+'px"><span class="sw" style="background:#f59e0b"></span>Receiving'+cpoHeadDeltaHtml(sumDeltaRcv)+'</th>'+
+    '<th style="width:'+cpoColWidths.packing+'px"><span class="sw" style="background:#16a34a"></span>Packing'+cpoHeadDeltaHtml(sumDeltaPack)+'</th>'+
     (showProjection?('<th class="left" style="width:'+cpoColWidths.projection+'px">能否如期完成</th>'):'')+
     '</tr>';
   var todayMs=new Date(new Date().toDateString()).getTime();
