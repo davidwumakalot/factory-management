@@ -315,7 +315,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
         <button class="btn primary" onclick="downloadWip()">⬇ 下載WIP明細</button>
       </div>
       <div class="dl-bar" id="dl-bar-cpoprog" style="display:none">
-        <button class="btn primary" onclick="downloadCpoProg()">⬇ 下載CPO生產進度明細</button>
+        <button class="btn primary" onclick="downloadCpoProg()">⬇ 下載目前的生產進度報表</button>
       </div>
       <div class="dl-bar" id="dl-bar-hours" style="display:none">
         <button class="btn primary" onclick="downloadHours()">⬇ 下載工時人數資料</button>
@@ -610,66 +610,22 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <!-- CPO production progress tab -->
     <div id="tab-cpoprog" style="display:none">
       <div class="chart-card" style="margin-bottom:16px">
-        <div class="chart-title">CPO生產進度（資料來源：Daily All FIFO_COLOR_SIZE 明細檔，依工廠／客戶／款式／顏色／Exp Date 彙總 CPO、Cutting、Receiving、Packing 數量）</div>
-        <div class="cap-upload-bar" style="margin-bottom:10px">
-          <button class="btn" onclick="document.getElementById('fi-cpoprog-a').click()">📂 選擇昨天的明細檔（快照 A）</button>
-          <input type="file" id="fi-cpoprog-a" accept=".csv,.xlsx,.xls,.xlsm" style="display:none">
-          <span style="font-size:12px;color:#16a34a;font-weight:600" id="fname-cpoprog-a"></span>
-          <span style="font-size:11px;color:#94a3b8" id="cpoprog-hint-a">尚未上傳・選填，用於計算「今天比昨天」各工段增加量</span>
-        </div>
+        <div class="chart-title">CPO生產進度（資料來源：工廠端每日匯出的「生產進度」報表 HTML 檔，上傳後直接嵌入顯示，含出口欠數／款式進度／PO明細等原始功能）</div>
         <div class="cap-upload-bar">
-          <button class="btn primary" onclick="document.getElementById('fi-cpoprog-b').click()">📂 選擇今天的明細檔（快照 B）</button>
-          <input type="file" id="fi-cpoprog-b" accept=".csv,.xlsx,.xls,.xlsm" style="display:none">
-          <span style="font-size:12px;color:#16a34a;font-weight:600" id="fname-cpoprog-b"></span>
-          <span style="font-size:11px;color:#94a3b8" id="cpoprog-hint-b">尚未上傳・必填，作為目前進度快照</span>
+          <button class="btn primary" onclick="document.getElementById('fi-cpoprog').click()">📂 選擇生產進度報表（HTML，可一次選多個工廠）</button>
+          <input type="file" id="fi-cpoprog" accept=".html,.htm" multiple style="display:none">
+          <span style="font-size:11px;color:#94a3b8" id="cpoprog-hint">尚未上傳・請上傳工廠端每天匯出的「生產進度」HTML 報表（可一次選多個工廠的檔案，例如 GLD5＋GLD6）</span>
         </div>
-      </div>
-
-      <div class="overview-filter-bar">
-        <div class="filter-group"><label>工廠 (MAKER)</label>
-          <select id="cpoprog-mk-select" onchange="cpoProgMkFilter=this.value;renderCpoProgTab()" style="height:34px"></select>
-        </div>
-        <div class="filter-group"><label>出口期範圍</label>
-          <select id="cpoprog-week" onchange="cpoProgWeekFilter=this.value;renderCpoProgTab()" style="height:34px">
-            <option value="all">全部（排除2週以上舊單）</option>
-            <option value="last">上週出口</option>
-            <option value="this">本週出口</option>
-            <option value="next">下週出口</option>
-            <option value="next2">下下週出口</option>
-          </select>
-        </div>
-        <div class="filter-group"><label>搜尋款式／客戶</label>
-          <input type="text" id="cpoprog-search" placeholder="輸入款號或客戶代碼" oninput="renderCpoProgTab()" style="height:34px;padding:0 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-        </div>
-        <div class="filter-group"><label>排序依據</label>
-          <select id="cpoprog-sort" onchange="renderCpoProgTab()" style="height:34px">
-            <option value="expdate_asc">Exp Date（近到遠，找急單）</option>
-            <option value="pack_asc">Packing進度（低到高，找落後款）</option>
-            <option value="order_desc">CPO數量（高到低）</option>
-            <option value="style_asc">款式（字母順序）</option>
-          </select>
-        </div>
-        <div class="filter-group"><label>顯示前</label>
-          <select id="cpoprog-topn" onchange="renderCpoProgTab()" style="height:34px">
-            <option value="50">50</option>
-            <option value="100" selected>100</option>
-            <option value="300">300</option>
-            <option value="99999">全部</option>
-          </select>
-        </div>
+        <div id="cpoprog-status" style="font-size:12px;color:#16a34a;font-weight:600;margin-top:4px"></div>
       </div>
 
       <div class="cap-warning" id="cpoprog-empty-warning" style="display:flex">
-        ⚠ 請先上傳今天的明細檔（快照 B）才能顯示CPO生產進度。
-      </div>
-      <div class="cap-warning" id="cpoprog-capacity-hint" style="display:none;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a">
-        ℹ 「能否如期完成」預估需要「效率趨勢」分頁已上傳的 Target Per Hari 與 PP Schedule 資料，請先至該分頁上傳。
+        ⚠ 請先上傳生產進度報表（HTML）才能顯示CPO生產進度。
       </div>
 
-      <div class="chart-card">
-        <div class="chart-title">各廠／各款 進度（分母為CPO數量合計；點一下款式列可展開／收合該款各顏色×Exp Date明細；紅字Exp Date表示已逾期但尚未出貨完成；已自動排除 Exp Date 早於「今天－2週」的舊明細；進度條後方紅字＝較昨天（快照A）增加量；選「出口期範圍」為上／本／下週時，會依「效率趨勢」分頁已上傳的 PP Schedule＋Target Per Hari 資料，估算剩餘量（CPO－Receiving）能否如期完成）</div>
-        <div id="cpoprog-summary" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:#475569"></div>
-        <div id="cpoprog-rows"></div>
+      <div class="chart-card" id="cpoprog-card" style="display:none;padding:0;overflow:hidden">
+        <div id="cpoprog-factory-tabs" style="display:flex;gap:6px;padding:8px 10px;background:#f1f5f9;border-bottom:1px solid var(--border);flex-wrap:wrap"></div>
+        <iframe id="cpoprog-iframe" title="CPO生產進度報表" style="width:100%;height:80vh;border:0;display:block;background:#fff"></iframe>
       </div>
     </div>
 
@@ -925,14 +881,9 @@ var holidaySet={};                 // {'YYYY-MM-DD': true} merged from any uploa
 var wipSnapA=null, wipSnapB=null;  // {records:[{maker,cust,style,orderERP,cutCum,delCum,sewCum,eqcCum,rcvCum,packCum}], fileName, sheetName}
 var wipMkFilter='';
 var wipSelected={};            // {styleKey: true} — user-marked styles, persists across filter/sort/re-render
-var cpoProgSnapA=null, cpoProgSnapB=null; // {details:[{key,maker,cust,style,color,expDate,expMs,cpoQty,cutting,receiving,packing,cpoCount}],fileName,rowCount} — A=昨天(選填,供對比), B=今天(必填)
-var cpoProgMkFilter='';
-var cpoProgExpanded={};        // {styleGroupKey: true} — which style rows are expanded to show color/Exp-Date detail, persists across re-renders
-var cpoProgLastShown=[];       // most recently rendered (filtered+sorted+topN) style groups — backs the "全部展開" link
-var cpoProgWeekFilter='all';   // 'all' | 'last' | 'this' | 'next' | 'next2' — Exp Date week bucket for the 完成度預估 view
-var CPOPROG_WEEK_OFFSETS={last:-1,this:0,next:1,next2:2}; // weeks relative to today's Mon–Sun week
-var CPOPROG_WEEK_LABELS={last:'上週出口',this:'本週出口',next:'下週出口',next2:'下下週出口'};
-var cpoProgPpHolidaysInfo='';  // latest "parsed Holidays_Table from a PP Schedule upload" status message, shown in the CPO tab's hint
+var cpoProgReports={};         // {factoryKey: {fileName, html, loadedAt}} — one entry per uploaded/auto-loaded "生產進度" HTML report, keyed by factory (e.g. 'GLD6'); each is embedded via iframe srcdoc, never parsed
+var cpoProgActiveFactory='';   // which factoryKey's report is currently shown in the iframe
+var cpoProgPpHolidaysInfo='';  // kept only because handlePPScheduleFile() still assigns it (no longer displayed anywhere; the CPO tab that used to show this hint was replaced by the embedded HTML report above)
 var sewingOutputDays={};       // {'YYYY-MM-DD': {date,pcs,persons,hours,eff,fileName}} — one entry per uploaded Target Per Hari day-file
 var hoursDistByFactory={};     // {factoryName: {depts:[{name,dates:[{dateLabel,buckets,totalPersons,totalHours,dailyAvg,weeklyAvg}]}], bucketLabels:[...]}}
 var hoursDistFactory='';
@@ -2119,639 +2070,92 @@ function downloadWip(){
 }
 
 /* ===================== CPO production progress tab ===================== */
-// Aggregates the "Daily All FIFO_COLOR_SIZE" detail file (one row per CPO/COLOR/SIZE) into one
-// detail record per 工廠(MAKER)×客戶(CUST)×款式(STYLE)×顏色(COLOR_CODE)×Exp Date, summing
-// CPO_QTY/CUTTING/RECEIVING/PACKING across every size/CPO that shares that combination. The tab
-// then rolls these details up one level further (by MAKER×CUST×STYLE) at render time so the table
-// shows one collapsed progress-bar row per style by default, with color/Exp-Date detail rows
-// available on click — this keeps the row count manageable even though the underlying detail can
-// have dozens of color/date combinations per style.
+// 2026/08/18: replaced the old "parse Daily All FIFO_COLOR_SIZE CSV and compute progress bars /
+// deltas / completion projections in JS" implementation with a much simpler approach: the factory
+// side now exports an already-fully-built "生產進度" HTML report per day (per factory) that already
+// has its own search/customer-filter/week-tabs/expandable-detail functionality baked in. Rather than
+// re-parsing the underlying data and re-implementing that UI, this tab just embeds the uploaded HTML
+// wholesale via <iframe srcdoc="...">, which keeps it fully isolated from this page's own CSS/JS (no
+// class/id collisions) and preserves 100% of the source report's native behavior for free.
 function setupCpoProgUpload(){
-  document.getElementById('fi-cpoprog-a').addEventListener('change',function(e){
-    if(e.target.files[0])handleCpoProgFile(e.target.files[0],'A');
-  });
-  document.getElementById('fi-cpoprog-b').addEventListener('change',function(e){
-    if(e.target.files[0])handleCpoProgFile(e.target.files[0],'B');
+  document.getElementById('fi-cpoprog').addEventListener('change',function(e){
+    Array.prototype.forEach.call(e.target.files,function(f){handleCpoProgFile(f);});
+    e.target.value=''; // allow re-selecting the same filename later (e.g. re-uploading today's file)
   });
 }
 
-// Exp Dates older than this are hidden by default (business rule: anything more than 2 weeks past
-// due is assumed already closed out / no longer actionable). Computed fresh on every render (not
-// baked in at parse time) so the cutoff stays correct day to day without re-uploading the file.
-function cpoProgCutoffMs(){
-  var d=new Date();
-  d.setHours(0,0,0,0);
-  d.setDate(d.getDate()-14);
-  return d.getTime();
+// Derives a factory key ('GLD5','GLD6',...) from the filename so multiple factories' reports can be
+// uploaded/auto-loaded together and switched between, instead of one overwriting another. Falls back
+// to the filename itself (sans extension) when no GLD# pattern is found, so unrecognized files still
+// get their own tab rather than silently colliding under a shared blank key.
+function cpoProgFactoryKey(fileName){
+  var m=fileName.match(/GLD\s*-?\s*(\d+)/i);
+  if(m)return 'GLD'+m[1];
+  return fileName.replace(/\.[^.]+$/,'');
 }
 
-// M/D/YYYY[ h:mm:ss AM/PM] -> epoch ms (local midnight of that date), or null if unparsable.
-function parseCpoExpDateMs(raw){
-  if(!raw)return null;
-  var m=String(raw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if(m){
-    var mo=parseInt(m[1],10), d=parseInt(m[2],10), y=parseInt(m[3],10);
-    var dt=new Date(y,mo-1,d);
-    return isNaN(dt.getTime())?null:dt.getTime();
-  }
-  var dt2=new Date(raw);
-  return isNaN(dt2.getTime())?null:dt2.getTime();
-}
-function formatCpoExpDate(raw,ms){
-  if(ms===null||ms===undefined){return raw||'';}
-  var d=new Date(ms);
-  return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0');
-}
-
-// Fast manual CSV parser (file has no quoted/escaped commas — confirmed by header layout) that
-// aggregates directly into groups while scanning, rather than materializing 80k+ row objects first.
-function parseCpoProgCsvText(text){
-  if(text.charCodeAt(0)===0xFEFF)text=text.slice(1); // strip BOM
-  var lines=text.split(/\r\n|\n/);
-  if(!lines.length||!lines[0])throw new Error('檔案是空的');
-  var header=lines[0].split(',').map(function(h){return h.trim();});
-  var idx={};
-  header.forEach(function(h,i){idx[h]=i;});
-  var required=['MAKER','CUST','STYLE','COLOR_CODE','EXP_DATE','CPO','CPO_QTY','CUTTING','RECEIVING','PACKING'];
-  var missing=required.filter(function(k){return idx[k]===undefined;});
-  if(missing.length)throw new Error('找不到欄位：'+missing.join('、')+'（請確認上傳的是 Daily All FIFO_COLOR_SIZE 明細檔）');
-  function num(v){var n=parseFloat(v);return isNaN(n)?0:n;}
-  var groups={};
-  var rowCount=0;
-  for(var i=1;i<lines.length;i++){
-    var line=lines[i];
-    if(!line)continue;
-    var cols=line.split(',');
-    if(cols.length<header.length)continue;
-    var maker=(cols[idx.MAKER]||'').trim();
-    if(!maker)continue;
-    var style=(cols[idx.STYLE]||'').trim();
-    var cust=(cols[idx.CUST]||'').trim();
-    var color=(cols[idx.COLOR_CODE]||'').trim();
-    var cpo=(cols[idx.CPO]||'').trim();
-    var expRaw=(cols[idx.EXP_DATE]||'').trim();
-    var expMs=parseCpoExpDateMs(expRaw);
-    var key=maker+'|||'+cust+'|||'+style+'|||'+color+'|||'+(expMs!==null?expMs:expRaw);
-    var g=groups[key];
-    if(!g){g=groups[key]={key:key,maker:maker,cust:cust,style:style,color:color,expDate:expRaw,expMs:expMs,cpoQty:0,cutting:0,receiving:0,packing:0,cpoSet:{}};}
-    g.cpoQty+=num(cols[idx.CPO_QTY]); g.cutting+=num(cols[idx.CUTTING]); g.receiving+=num(cols[idx.RECEIVING]); g.packing+=num(cols[idx.PACKING]);
-    if(cpo)g.cpoSet[cpo]=true;
-    rowCount++;
-  }
-  var out=Object.keys(groups).map(function(k){var g=groups[k];g.cpoCount=Object.keys(g.cpoSet).length;delete g.cpoSet;return g;});
-  return {groups:out,rowCount:rowCount};
-}
-
-// Same aggregation for an Excel upload of the same data (array-of-arrays with header in row 0).
-function aggregateCpoAoa(aoa){
-  if(!aoa.length)throw new Error('檔案是空的');
-  var header=(aoa[0]||[]).map(function(h){return String(h||'').trim();});
-  var idx={};
-  header.forEach(function(h,i){idx[h]=i;});
-  var required=['MAKER','CUST','STYLE','COLOR_CODE','EXP_DATE','CPO','CPO_QTY','CUTTING','RECEIVING','PACKING'];
-  var missing=required.filter(function(k){return idx[k]===undefined;});
-  if(missing.length)throw new Error('找不到欄位：'+missing.join('、')+'（請確認上傳的是 Daily All FIFO_COLOR_SIZE 明細檔）');
-  function num(v){var n=parseFloat(v);return isNaN(n)?0:n;}
-  function expFromCell(v){
-    if(v===null||v===undefined||v==='')return {raw:'',ms:null};
-    if(typeof v==='number'){
-      try{var p=XLSX.SSF.parse_date_code(v);if(p&&p.y){var ms=new Date(p.y,p.m-1,p.d).getTime();return {raw:p.y+'/'+String(p.m).padStart(2,'0')+'/'+String(p.d).padStart(2,'0'),ms:ms};}}catch(e){}
-    }
-    var s=String(v).trim();
-    return {raw:s,ms:parseCpoExpDateMs(s)};
-  }
-  var groups={};
-  var rowCount=0;
-  for(var i=1;i<aoa.length;i++){
-    var row=aoa[i];
-    if(!row)continue;
-    var maker=String(row[idx.MAKER]||'').trim();
-    if(!maker)continue;
-    var style=String(row[idx.STYLE]||'').trim();
-    var cust=String(row[idx.CUST]||'').trim();
-    var color=String(row[idx.COLOR_CODE]||'').trim();
-    var cpo=String(row[idx.CPO]||'').trim();
-    var exp=expFromCell(row[idx.EXP_DATE]);
-    var key=maker+'|||'+cust+'|||'+style+'|||'+color+'|||'+(exp.ms!==null?exp.ms:exp.raw);
-    var g=groups[key];
-    if(!g){g=groups[key]={key:key,maker:maker,cust:cust,style:style,color:color,expDate:exp.raw,expMs:exp.ms,cpoQty:0,cutting:0,receiving:0,packing:0,cpoSet:{}};}
-    g.cpoQty+=num(row[idx.CPO_QTY]); g.cutting+=num(row[idx.CUTTING]); g.receiving+=num(row[idx.RECEIVING]); g.packing+=num(row[idx.PACKING]);
-    if(cpo)g.cpoSet[cpo]=true;
-    rowCount++;
-  }
-  var out=Object.keys(groups).map(function(k){var g=groups[k];g.cpoCount=Object.keys(g.cpoSet).length;delete g.cpoSet;return g;});
-  return {groups:out,rowCount:rowCount};
-}
-
-function handleCpoProgFile(file,slot){
-  var fnId = slot==='A' ? 'fname-cpoprog-a' : 'fname-cpoprog-b';
-  var hintId = slot==='A' ? 'cpoprog-hint-a' : 'cpoprog-hint-b';
-  document.getElementById(fnId).textContent='⏳ 解析中...';
-  var isCsv=/\.csv$/i.test(file.name);
+function handleCpoProgFile(file){
+  var key=cpoProgFactoryKey(file.name);
+  document.getElementById('cpoprog-status').textContent='⏳ 讀取中：'+file.name;
   var reader=new FileReader();
-  reader.onerror=function(){document.getElementById(fnId).textContent='⚠ 檔案讀取失敗';};
-  if(isCsv){
-    reader.onload=function(ev){
-      try{
-        var res=parseCpoProgCsvText(ev.target.result);
-        finishCpoProgLoad(res.groups,res.rowCount,file.name,slot);
-      }catch(err){
-        document.getElementById(fnId).textContent='⚠ 解析失敗：'+err.message;
-      }
-    };
-    reader.readAsText(file,'UTF-8');
-  } else {
-    reader.onload=function(ev){
-      try{
-        var wb=XLSX.read(ev.target.result,{type:'array',cellDates:false});
-        var aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:'',raw:true});
-        var res=aggregateCpoAoa(aoa);
-        finishCpoProgLoad(res.groups,res.rowCount,file.name,slot);
-      }catch(err){
-        document.getElementById(fnId).textContent='⚠ 解析失敗：'+err.message;
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  }
+  reader.onerror=function(){document.getElementById('cpoprog-status').textContent='⚠ 檔案讀取失敗：'+file.name;};
+  reader.onload=function(ev){
+    cpoProgReports[key]={fileName:file.name,html:ev.target.result,loadedAt:new Date()};
+    cpoProgActiveFactory=key; // most recently loaded becomes the active tab
+    document.getElementById('cpoprog-status').textContent='✓ 已載入 '+Object.keys(cpoProgReports).length+' 份報表，最後更新：'+file.name+'（'+new Date().toLocaleString()+'）';
+    document.getElementById('cpoprog-hint').textContent='已載入：'+Object.keys(cpoProgReports).sort().join('、');
+    if(currentTab==='cpoprog')renderCpoProgTab();
+  };
+  reader.readAsText(file,'UTF-8');
 }
 
-function finishCpoProgLoad(details,rowCount,fileName,slot){
-  var fnId = slot==='A' ? 'fname-cpoprog-a' : 'fname-cpoprog-b';
-  var hintId = slot==='A' ? 'cpoprog-hint-a' : 'cpoprog-hint-b';
-  var snap={details:details,fileName:fileName,rowCount:rowCount};
-  if(slot==='A')cpoProgSnapA=snap; else cpoProgSnapB=snap;
-  document.getElementById(fnId).textContent='✓ '+fileName;
-  document.getElementById(hintId).textContent='已匯入 '+rowCount.toLocaleString()+' 筆明細，彙總為 '+details.length.toLocaleString()+' 組（工廠×客戶×款式×顏色×Exp Date）';
-  if(currentTab==='cpoprog')renderCpoProgTab();
-}
-
-function populateCpoProgMkSelect(){
-  var sel=document.getElementById('cpoprog-mk-select');
-  var s={};
-  if(cpoProgSnapB)cpoProgSnapB.details.forEach(function(r){s[r.maker]=1;});
-  var mks=Object.keys(s).sort();
-  var cur=cpoProgMkFilter;
-  sel.innerHTML='<option value="">全部工廠</option>'+mks.map(function(mk){return '<option value="'+mk+'">'+mk+'</option>';}).join('');
-  if(mks.indexOf(cur)>=0)sel.value=cur; else {cpoProgMkFilter='';sel.value='';}
-}
-
-// Builds a lookup {detailKey: detailRecord} from snapshot A so today's (B) rows can be matched
-// against yesterday's figures. Returns null when snapshot A hasn't been uploaded — callers use
-// that null to distinguish "no comparison available" from "compared, nothing there yesterday".
-function cpoProgBuildAIndex(){
-  if(!cpoProgSnapA)return null;
-  var idx={};
-  cpoProgSnapA.details.forEach(function(d){idx[d.key]=d;});
-  return idx;
-}
-
-// Renders one progress-bar cell, same visual as wipMiniCellHtml, plus an optional small red
-// "＋N／－N" badge showing the change vs. snapshot A (only when aIndex!==null, i.e. a snapshot A
-// was uploaded — a missing match within aIndex is treated as 0 yesterday, i.e. "all new today").
-function cpoProgCellHtml(val,order,cls,deltaVal){
-  var ord=Math.max(order,1);
-  var pct=val/ord*100;
-  var fillPct=Math.min(100,Math.max(0,pct));
-  // Delta text (+123/-45) is optional per row, but the <span> itself is always rendered at a fixed
-  // width (see .cpoprog-delta CSS: width, not max-width) — even empty — so every row in the same
-  // column reserves identical total width. Without this, rows with a delta vs rows without would
-  // make the table auto-size the column to the widest row, and since .wip-mini-cell right-aligns its
-  // content (justify-content:flex-end), the progress bar itself would visibly shift/jump left-right
-  // between rows depending on whether that row happens to have a delta.
-  var deltaText='', deltaTitleAttr='';
-  if(deltaVal!==null&&deltaVal!==undefined){
-    var dv=Math.round(deltaVal);
-    if(dv!==0){
-      var sign=dv>0?'+':'';
-      deltaText=sign+dv.toLocaleString();
-      deltaTitleAttr=' title="較昨天'+(dv>0?'增加':'減少')+' '+Math.abs(dv).toLocaleString()+'"';
-    }
-  }
-  var deltaHtml='<span class="cpoprog-delta"'+deltaTitleAttr+'>'+deltaText+'</span>';
-  return '<td><div class="wip-mini-cell" title="'+Math.round(val).toLocaleString()+' / '+Math.round(order).toLocaleString()+'">'+
-    '<div class="wip-mini-track"><div class="wip-mini-fill '+cls+'" style="width:'+fillPct.toFixed(2)+'%"></div>'+
-    '<span class="wip-mini-track-label">'+Math.round(val).toLocaleString()+'</span></div>'+
-    '<span class="wip-mini-pct">'+pct.toFixed(1)+'%</span>'+deltaHtml+'</div></td>';
-}
-
-function cpoProgGroupKey(r){return r.maker+'|||'+r.cust+'|||'+r.style;}
-
-function toggleCpoProgGroup(key){
-  if(cpoProgExpanded[key])delete cpoProgExpanded[key]; else cpoProgExpanded[key]=true;
+function switchCpoProgFactory(key){
+  cpoProgActiveFactory=key;
   renderCpoProgTab();
-}
-function cpoProgExpandAll(){
-  cpoProgLastShown.forEach(function(g){cpoProgExpanded[g.key]=true;});
-  renderCpoProgTab();
-}
-function cpoProgCollapseAll(){
-  cpoProgExpanded={};
-  renderCpoProgTab();
-}
-
-// Rolls the (already filtered) detail records up into one entry per MAKER×CUST×STYLE, summing
-// qty across every remaining color/Exp-Date combination and keeping the individual details
-// (sorted by Exp Date then color) for the expandable sub-rows. When aIndex is provided (snapshot A
-// was uploaded), each detail/group also gets deltaCutting/deltaReceiving/deltaPacking = today minus
-// yesterday's matching figure (0 if that exact color×Exp-Date combo wasn't in yesterday's file).
-function cpoProgBuildStyleGroups(details,aIndex){
-  var byKey={};
-  details.forEach(function(d){
-    var aRec = aIndex ? aIndex[d.key] : null;
-    var deltaCutting = aIndex ? (d.cutting-(aRec?aRec.cutting:0)) : null;
-    var deltaReceiving = aIndex ? (d.receiving-(aRec?aRec.receiving:0)) : null;
-    var deltaPacking = aIndex ? (d.packing-(aRec?aRec.packing:0)) : null;
-    var row={maker:d.maker,cust:d.cust,style:d.style,color:d.color,expDate:d.expDate,expMs:d.expMs,
-      cpoQty:d.cpoQty,cutting:d.cutting,receiving:d.receiving,packing:d.packing,cpoCount:d.cpoCount,
-      deltaCutting:deltaCutting,deltaReceiving:deltaReceiving,deltaPacking:deltaPacking};
-    var key=cpoProgGroupKey(d);
-    var g=byKey[key];
-    if(!g){g=byKey[key]={key:key,maker:d.maker,cust:d.cust,style:d.style,cpoQty:0,cutting:0,receiving:0,packing:0,
-      deltaCutting:aIndex?0:null,deltaReceiving:aIndex?0:null,deltaPacking:aIndex?0:null,
-      colorSet:{},minExpMs:null,maxExpMs:null,details:[]};}
-    g.cpoQty+=d.cpoQty; g.cutting+=d.cutting; g.receiving+=d.receiving; g.packing+=d.packing;
-    if(aIndex){g.deltaCutting+=deltaCutting; g.deltaReceiving+=deltaReceiving; g.deltaPacking+=deltaPacking;}
-    g.colorSet[d.color||'(無顏色)']=true;
-    if(d.expMs!==null){
-      if(g.minExpMs===null||d.expMs<g.minExpMs)g.minExpMs=d.expMs;
-      if(g.maxExpMs===null||d.expMs>g.maxExpMs)g.maxExpMs=d.expMs;
-    }
-    g.details.push(row);
-  });
-  return Object.keys(byKey).map(function(k){
-    var g=byKey[k];
-    g.colorCount=Object.keys(g.colorSet).length;
-    delete g.colorSet;
-    g.details.sort(function(a,b){
-      var ma=a.expMs===null?Infinity:a.expMs, mb=b.expMs===null?Infinity:b.expMs;
-      if(ma!==mb)return ma-mb;
-      return (a.color||'').localeCompare(b.color||'');
-    });
-    return g;
-  });
-}
-
-/* ---- "能否如期完成" capacity projection: 上週/本週/下週出口期 view ----
-   Uses two data sources that already live in the 效率趨勢 tab's global state (no separate upload
-   needed here): ppPlanDataMap (PP Schedule → which lines are still assigned to a style, and how
-   much unfinished qty is allocated to each) and effTrendDays (Target Per Hari → each of those
-   lines' most recent daily target pcs while producing that exact style). Working days are counted
-   with the same Sunday+Holidays_Table rule (isWorkday) used everywhere else in the app; Holidays_Table
-   can come from either the B04_Capacity upload or a PP Schedule upload (see parseHolidaysTableSheet). */
-
-// Monday–Sunday boundaries for offset weeks relative to today (offset -1=上週,0=本週,1=下週).
-function cpoProgWeekRange(offset){
-  var now=new Date(); now.setHours(0,0,0,0);
-  var day=now.getDay(); // 0=Sun..6=Sat
-  var diffToMon=(day===0?-6:1-day);
-  var monday=new Date(now); monday.setDate(now.getDate()+diffToMon+offset*7);
-  var sunday=new Date(monday); sunday.setDate(monday.getDate()+6); sunday.setHours(23,59,59,999);
-  return {startMs:monday.getTime(), endMs:sunday.getTime()};
-}
-
-// Working-day count from startMs through endMs inclusive (Sundays + holidaySet dates excluded).
-function cpoProgCountWorkdays(startMs,endMs){
-  if(endMs<startMs)return 0;
-  var c=0, cur=new Date(startMs), end=new Date(endMs);
-  var guard=0;
-  while(cur.getTime()<=end.getTime()&&guard<3660){ // ~10yr safety cap
-    if(isWorkday(cur.getFullYear(),cur.getMonth()+1,cur.getDate()))c++;
-    cur.setDate(cur.getDate()+1);
-    guard++;
-  }
-  return c;
-}
-
-// Walks forward day by day (skipping non-workdays) accumulating dailyRate until qtyNeeded is met;
-// returns the ms timestamp of the day it's met, or null if dailyRate<=0 or it doesn't finish within
-// the safety cap (~2 years out).
-function cpoProgProjectFinishMs(startMs,dailyRate,qtyNeeded){
-  if(qtyNeeded<=0)return startMs;
-  if(dailyRate<=0)return null;
-  var remaining=qtyNeeded, cur=new Date(startMs), guard=0;
-  while(guard<730){
-    if(isWorkday(cur.getFullYear(),cur.getMonth()+1,cur.getDate())){
-      remaining-=dailyRate;
-      if(remaining<=1e-6)return cur.getTime();
-    }
-    cur.setDate(cur.getDate()+1);
-    guard++;
-  }
-  return null;
-}
-
-function cpoProgStyleKeyNorm(s){return String(s||'').trim().toUpperCase();}
-
-// {lineStr: {qty:unfinishedQty, entries:[{qty,sewStartMs,sewFinMs,eff,style},...]}} for every PP
-// Schedule line|style entry matching this style at this factory that still has unfinished qty
-// allocated (qty>0). Keeps the raw entries (not just the summed qty) so a missing Target Per Hari
-// match can fall back to a rate implied by the schedule's own qty÷date-window (see
-// cpoProgLinePpImpliedRate below).
-function cpoProgAssignedLinesForStyle(mk,style){
-  var target=cpoProgStyleKeyNorm(style);
-  var map=ppPlanDataMap[mk]||{};
-  var lines={};
-  Object.keys(map).forEach(function(key){
-    var sep=key.indexOf('|');
-    if(sep<0)return;
-    var lineStr=key.slice(0,sep), styleStr=key.slice(sep+1);
-    if(cpoProgStyleKeyNorm(styleStr)!==target)return;
-    var entries=(map[key]||[]).filter(function(e){return (e.qty||0)>0;});
-    if(!entries.length)return;
-    var qty=entries.reduce(function(s,e){return s+(e.qty||0);},0);
-    if(!lines[lineStr])lines[lineStr]={qty:0,entries:[]};
-    lines[lineStr].qty+=qty;
-    lines[lineStr].entries=lines[lineStr].entries.concat(entries);
-  });
-  return lines;
-}
-
-// Most recent Target Per Hari daily target (pcs) reported for this exact line+style at this
-// factory, scanning newest-first across whatever days are cached in effTrendDays (≤7 kept/factory).
-function cpoProgLineRecentTargetForStyle(mk,line,style){
-  var target=cpoProgStyleKeyNorm(style);
-  var days=effTrendDays.filter(function(d){return d.factory===mk;});
-  for(var i=days.length-1;i>=0;i--){
-    var ld=days[i].lines[line];
-    if(!ld)continue;
-    var styleMatch = cpoProgStyleKeyNorm(ld.primaryStyle)===target ||
-      (ld.allStyles&&ld.allStyles.some(function(s){return cpoProgStyleKeyNorm(s)===target;}));
-    if(styleMatch)return {rate:ld.totalTarget,dateLabel:days[i].date};
-  }
-  return null;
-}
-
-// Fallback when Target Per Hari has no matching daily-target report for this line+style: derive an
-// implied daily rate straight from the PP Schedule (排單) itself — this line's unfinished qty
-// spread evenly over the working days from today through its latest Sewing Finish date.
-function cpoProgLinePpImpliedRate(lineInfo){
-  var todayMs=new Date(new Date().toDateString()).getTime();
-  var fins=lineInfo.entries.map(function(e){return e.sewFinMs;}).filter(function(v){return v!==null&&v!==undefined;});
-  if(!fins.length)return null;
-  var winEnd=Math.max.apply(null,fins);
-  if(winEnd<todayMs)return null; // schedule's Sewing Finish already passed — no forward window to derive a rate from
-  var wd=cpoProgCountWorkdays(todayMs,winEnd);
-  if(wd<=0)return null;
-  return {rate:lineInfo.qty/wd,dateLabel:'排單推算（至'+formatCpoExpDate('',winEnd)+'）'};
-}
-
-// Combines PP Schedule (which lines, and — as a fallback — qty÷date-window implied rate) + Target
-// Per Hari (each line's actual reported daily rate, preferred when available) into one pcs/workday
-// estimate for a style at a factory.
-function cpoProgStyleCapacity(mk,style){
-  var lines=cpoProgAssignedLinesForStyle(mk,style);
-  var lineNames=Object.keys(lines);
-  var dailyRate=0, matchedLines=[], unmatchedLines=[], ppFallbackCount=0;
-  lineNames.forEach(function(line){
-    var r=cpoProgLineRecentTargetForStyle(mk,line,style);
-    var source='target';
-    if(!r){
-      r=cpoProgLinePpImpliedRate(lines[line]);
-      source='pp';
-    }
-    if(r){
-      dailyRate+=r.rate; matchedLines.push({line:line,rate:r.rate,dateLabel:r.dateLabel,source:source});
-      if(source==='pp')ppFallbackCount++;
-    } else unmatchedLines.push(line);
-  });
-  return {dailyRate:dailyRate,totalLines:lineNames.length,matchedLines:matchedLines,unmatchedLines:unmatchedLines,
-    ppFallbackCount:ppFallbackCount,ppUnfinishedQty:lineNames.reduce(function(s,l){return s+lines[l].qty;},0)};
-}
-
-// Projects whether a style group can finish (剩餘量＝CPO數量－Receiving) by its earliest remaining
-// Exp Date (the conservative deadline — the group should already be date-filtered to one week by
-// the caller). status: done | onTrack | atRisk | noschedule | norate | nodeadline.
-function cpoProgProjectGroup(g){
-  var remaining=Math.max(0,g.cpoQty-g.receiving);
-  var result={remaining:remaining,deadlineMs:g.minExpMs};
-  if(remaining<=0){result.status='done';return result;}
-  var cap=cpoProgStyleCapacity(g.maker,g.style);
-  result.totalLines=cap.totalLines; result.matchedLines=cap.matchedLines.length; result.dailyRate=cap.dailyRate;
-  result.ppUnfinishedQty=cap.ppUnfinishedQty; result.ppFallbackCount=cap.ppFallbackCount;
-  if(cap.totalLines===0){result.status='noschedule';return result;}
-  if(cap.dailyRate<=0){result.status='norate';return result;}
-  if(g.minExpMs===null){result.status='nodeadline';return result;}
-  var todayMs=new Date(new Date().toDateString()).getTime();
-  var workDays=cpoProgCountWorkdays(todayMs,g.minExpMs);
-  var projectedQty=cap.dailyRate*workDays;
-  result.workDays=workDays; result.projectedQty=projectedQty;
-  // Always compute an actual projected finish date (not just for the at-risk case) so the badge can
-  // show a real 完成日期 regardless of status, per the user's instruction to state the date rather
-  // than just "estimated to finish on time".
-  result.projectedFinishMs=cpoProgProjectFinishMs(todayMs,cap.dailyRate,remaining);
-  if(projectedQty>=remaining){result.status='onTrack';}
-  else{
-    result.status='atRisk';
-    result.shortfall=remaining-projectedQty;
-  }
-  return result;
-}
-
-function cpoProgProjectionBadgeHtml(p){
-  var ppNote=(p.ppFallbackCount>0)?('（含 '+p.ppFallbackCount+' 線為排單推算日產）'):'';
-  if(p.status==='done')return '<span style="color:#16a34a;font-weight:700" title="剩餘量（CPO－Receiving）已達成">✅ 已達成</span>';
-  if(p.status==='noschedule')return '<span style="color:#94a3b8" title="PP Schedule 中找不到此款仍有未完成量的排線">❔ 無排線資料</span>';
-  if(p.status==='norate')return '<span style="color:#94a3b8" title="PP Schedule 有排線（'+p.totalLines+' 條線），但 Target Per Hari 近期資料與 PP Schedule 排單推算（需有效的未來 Sewing Finish 日期）都找不到對應的日產速度">❔ 無日產資料（'+p.totalLines+' 線）</span>';
-  if(p.status==='nodeadline')return '<span style="color:#94a3b8" title="此範圍內沒有有效的 Exp Date">❔ 無Exp Date</span>';
-  if(p.status==='onTrack')return '<span style="color:#16a34a;font-weight:700" title="剩餘 '+Math.round(p.remaining).toLocaleString()+' pcs／可用 '+p.workDays+' 個工作天／日產能約 '+Math.round(p.dailyRate).toLocaleString()+' pcs（'+p.matchedLines+' 線）'+ppNote+'／預估產出 '+Math.round(p.projectedQty).toLocaleString()+' pcs'+(p.projectedFinishMs?'／完成日期 '+formatCpoExpDate('',p.projectedFinishMs):'')+'">✅ '+(p.projectedFinishMs?'完成日期：'+formatCpoExpDate('',p.projectedFinishMs):'預估可如期完成')+ppNote+'</span>';
-  if(p.status==='atRisk')return '<span style="color:#dc2626;font-weight:700" title="剩餘 '+Math.round(p.remaining).toLocaleString()+' pcs／可用 '+p.workDays+' 個工作天／日產能約 '+Math.round(p.dailyRate).toLocaleString()+' pcs（'+p.matchedLines+' 線）'+ppNote+'／預估產出 '+Math.round(p.projectedQty).toLocaleString()+' pcs／缺口約 '+Math.round(p.shortfall).toLocaleString()+' pcs'+(p.projectedFinishMs?'／完成日期 '+formatCpoExpDate('',p.projectedFinishMs):'')+'">⚠ 預估延遲'+(p.projectedFinishMs?'（完成日期：'+formatCpoExpDate('',p.projectedFinishMs)+'）':'')+ppNote+'</span>';
-  return '';
 }
 
 function renderCpoProgTab(){
-  populateCpoProgMkSelect();
-  var hasData=!!(cpoProgSnapB && cpoProgSnapB.details.length>0);
+  var keys=Object.keys(cpoProgReports).sort();
+  var hasData=keys.length>0;
   document.getElementById('cpoprog-empty-warning').style.display=hasData?'none':'flex';
-  if(!hasData){
-    document.getElementById('cpoprog-rows').innerHTML='';
-    document.getElementById('cpoprog-summary').innerHTML='';
-    return;
-  }
-  var mk=cpoProgMkFilter;
-  var weekFilter=cpoProgWeekFilter;
-  var details=cpoProgSnapB.details;
-  var excludedOld=0, cutoffMs=null, weekRange=null;
-  if(weekFilter==='all'){
-    cutoffMs=cpoProgCutoffMs();
-    var totalBeforeCutoff=details.length;
-    details=details.filter(function(r){return r.expMs===null || r.expMs>=cutoffMs;});
-    excludedOld=totalBeforeCutoff-details.length;
+  document.getElementById('cpoprog-card').style.display=hasData?'block':'none';
+  if(!hasData)return;
+  if(keys.indexOf(cpoProgActiveFactory)<0)cpoProgActiveFactory=keys[0];
+
+  // Factory switcher tabs — only shown once there's more than one report loaded, so the single-
+  // factory case (the common one) stays visually identical to before.
+  var tabsEl=document.getElementById('cpoprog-factory-tabs');
+  if(keys.length>1){
+    tabsEl.style.display='flex';
+    tabsEl.innerHTML=keys.map(function(k){
+      var on=k===cpoProgActiveFactory;
+      return '<button class="btn'+(on?' primary':'')+'" style="padding:4px 12px;font-size:12px" onclick="switchCpoProgFactory(\''+escJsStr(k)+'\')">'+escHtml(k)+'</button>';
+    }).join('');
   } else {
-    weekRange=cpoProgWeekRange(CPOPROG_WEEK_OFFSETS[weekFilter]||0);
-    details=details.filter(function(r){return r.expMs!==null && r.expMs>=weekRange.startMs && r.expMs<=weekRange.endMs;});
-  }
-  if(mk)details=details.filter(function(r){return r.maker===mk;});
-  var q=(document.getElementById('cpoprog-search').value||'').trim().toLowerCase();
-  if(q)details=details.filter(function(r){return r.style.toLowerCase().indexOf(q)>=0 || r.cust.toLowerCase().indexOf(q)>=0 || (r.color||'').toLowerCase().indexOf(q)>=0;});
-
-  var aIndex=cpoProgBuildAIndex();
-  var hasSnapA=!!aIndex;
-  var groups=cpoProgBuildStyleGroups(details,aIndex);
-
-  var showProjection=weekFilter!=='all';
-  var hasCapacityData=Object.keys(ppPlanDataMap).length>0 || effTrendDays.length>0;
-  document.getElementById('cpoprog-capacity-hint').style.display=(showProjection&&!hasCapacityData)?'flex':'none';
-  if(showProjection){
-    groups.forEach(function(g){g.projection=cpoProgProjectGroup(g);});
+    tabsEl.style.display='none';
+    tabsEl.innerHTML='';
   }
 
-  var sortBy=document.getElementById('cpoprog-sort').value;
-  groups.sort(function(a,b){
-    if(sortBy==='pack_asc'){
-      var pa=a.cpoQty>0?a.packing/a.cpoQty:0, pb=b.cpoQty>0?b.packing/b.cpoQty:0;
-      return pa-pb;
-    }
-    if(sortBy==='order_desc')return b.cpoQty-a.cpoQty;
-    if(sortBy==='style_asc')return a.style.localeCompare(b.style);
-    var ma=a.minExpMs===null?Infinity:a.minExpMs, mb=b.minExpMs===null?Infinity:b.minExpMs;
-    return ma-mb; // expdate_asc default: soonest remaining Exp Date first
-  });
-
-  var topN=parseInt(document.getElementById('cpoprog-topn').value,10)||100;
-  var shown=groups.slice(0,topN);
-
-  var sumCpo=0,sumCut=0,sumRcv=0,sumPack=0,sumDetails=0,sumDeltaCut=0,sumDeltaRcv=0,sumDeltaPack=0;
-  groups.forEach(function(g){
-    sumCpo+=g.cpoQty;sumCut+=g.cutting;sumRcv+=g.receiving;sumPack+=g.packing;sumDetails+=g.details.length;
-    if(hasSnapA){sumDeltaCut+=g.deltaCutting;sumDeltaRcv+=g.deltaReceiving;sumDeltaPack+=g.deltaPacking;}
-  });
-  var cutoffLabel=formatCpoExpDate('',cutoffMs);
-  var weekLabel = CPOPROG_WEEK_LABELS[weekFilter]||'';
-  var weekRangeLabel = weekRange?(formatCpoExpDate('',weekRange.startMs)+' ~ '+formatCpoExpDate('',weekRange.endMs)):'';
-  function deltaTxt(v){var r=Math.round(v);return (r>0?'+':'')+r.toLocaleString();}
-  var projSummaryHtml='';
-  if(showProjection){
-    var cDone=0,cOnTrack=0,cAtRisk=0,cNoData=0;
-    groups.forEach(function(g){
-      var s=g.projection.status;
-      if(s==='done')cDone++;
-      else if(s==='onTrack')cOnTrack++;
-      else if(s==='atRisk')cAtRisk++;
-      else cNoData++;
-    });
-    projSummaryHtml='<div><b>'+weekLabel+'（'+weekRangeLabel+'）能否如期完成：</b>'+
-      '<span style="color:#16a34a;font-weight:700">✅ 可完成/已達成 '+(cDone+cOnTrack)+'</span>　'+
-      '<span style="color:#dc2626;font-weight:700">⚠ 預估延遲 '+cAtRisk+'</span>　'+
-      '<span style="color:#94a3b8">❔ 無法判斷 '+cNoData+'</span></div>'+
-      (cpoProgPpHolidaysInfo?('<div style="color:#94a3b8">PP Schedule 假日表：'+cpoProgPpHolidaysInfo+'</div>'):'');
+  var active=cpoProgReports[cpoProgActiveFactory];
+  var iframe=document.getElementById('cpoprog-iframe');
+  // Only re-write srcdoc when the active report actually changed (re-setting it on every tab-switch
+  // would reset the embedded report's own UI state — search text, expanded rows, which week tab is
+  // active).
+  if(iframe.getAttribute('data-loaded-key')!==cpoProgActiveFactory || iframe.srcdoc!==active.html){
+    iframe.srcdoc=active.html;
+    iframe.setAttribute('data-loaded-key',cpoProgActiveFactory);
   }
-  document.getElementById('cpoprog-summary').innerHTML=
-    '<div><b>款式數：</b>'+groups.length.toLocaleString()+'</div>'+
-    '<div><b>明細組數(顏色×Exp Date)：</b>'+sumDetails.toLocaleString()+'</div>'+
-    '<div><b>CPO數量合計：</b>'+Math.round(sumCpo).toLocaleString()+'</div>'+
-    '<div><b>整體Cutting進度：</b>'+(sumCpo>0?(sumCut/sumCpo*100).toFixed(1):'0.0')+'%</div>'+
-    '<div><b>整體Receiving進度：</b>'+(sumCpo>0?(sumRcv/sumCpo*100).toFixed(1):'0.0')+'%</div>'+
-    '<div><b>整體Packing進度：</b>'+(sumCpo>0?(sumPack/sumCpo*100).toFixed(1):'0.0')+'%</div>'+
-    (hasSnapA?
-      ('<div style="color:#dc2626"><b>今天比昨天：</b>Cutting '+deltaTxt(sumDeltaCut)+'／Receiving '+deltaTxt(sumDeltaRcv)+'／Packing '+deltaTxt(sumDeltaPack)+'</div>')
-      : '<div style="color:#94a3b8">尚未上傳快照 A（昨天），無法計算增加量</div>')+
-    (excludedOld>0?('<div style="color:#94a3b8"><b>已自動排除：</b>'+excludedOld.toLocaleString()+' 組 Exp Date 早於 '+cutoffLabel+'（今天往前2週）的舊明細</div>'):'')+
-    projSummaryHtml+
-    '<div><a href="javascript:void(0)" onclick="cpoProgExpandAll()" style="color:#1e3a8a;text-decoration:underline">全部展開</a>　'+
-    '<a href="javascript:void(0)" onclick="cpoProgCollapseAll()" style="color:#1e3a8a;text-decoration:underline">全部收合</a></div>';
-  cpoProgLastShown=shown; // used by the "全部展開" link above (avoids re-serializing the array into the onclick attribute)
-
-  // This table inherits the app-wide `table{table-layout:fixed}` rule, which sizes EVERY column to
-  // the width given on the header row's <th> cells (later rows' widths are ignored under fixed
-  // layout) — with no widths specified, all columns default to equal width, which was too narrow
-  // for the CUTTING/RECEIVING/PACKING progress-bar cells and clipped the value inside the bar.
-  // cutting/receiving/packing must each fit: track(92) + gap(6) + pct(38) + gap(6) + delta
-  // margin-left(3) + delta(46) = 191px of flex content, plus the cell's own 10px padding (5+5) =
-  // 201px minimum — 200px below was one earlier attempt that came in just short of that and still
-  // clipped; 210px leaves a small margin. Defined once here (not duplicated into a separate
-  // min-width constant) so the header and the table's overall min-width below can never drift apart.
-  var cpoColWidths = {maker:60,cust:70,style:150,color:70,expDate:130,cpoQty:85,cutting:210,receiving:210,packing:210,projection:200};
-  // Show each column's total delta right in the (sticky) header, not just in the #cpoprog-summary
-  // line above the table — that line scrolls out of view once you scroll down through many rows,
-  // while the header stays pinned (thead th has position:sticky;top:0), so this keeps "今天比昨天"
-  // visible no matter how far down the list you've scrolled.
-  function cpoHeadDeltaHtml(v){
-    if(!hasSnapA)return '';
-    var r=Math.round(v);
-    return '<div style="font-size:9px;font-weight:400;text-transform:none;letter-spacing:0;color:#fca5a5;margin-top:2px">'+(r>0?'+':'')+r.toLocaleString()+'</div>';
-  }
-  var theadHtml='<tr><th class="left" style="width:'+cpoColWidths.maker+'px">工廠</th><th class="left" style="width:'+cpoColWidths.cust+'px">客戶</th>'+
-    '<th class="left" style="width:'+cpoColWidths.style+'px">款式</th><th class="left" style="width:'+cpoColWidths.color+'px">顏色</th>'+
-    '<th style="width:'+cpoColWidths.expDate+'px">Exp Date</th><th style="width:'+cpoColWidths.cpoQty+'px">CPO數量</th>'+
-    '<th style="width:'+cpoColWidths.cutting+'px"><span class="sw" style="background:#3b82f6"></span>Cutting'+cpoHeadDeltaHtml(sumDeltaCut)+'</th>'+
-    '<th style="width:'+cpoColWidths.receiving+'px"><span class="sw" style="background:#f59e0b"></span>Receiving'+cpoHeadDeltaHtml(sumDeltaRcv)+'</th>'+
-    '<th style="width:'+cpoColWidths.packing+'px"><span class="sw" style="background:#16a34a"></span>Packing'+cpoHeadDeltaHtml(sumDeltaPack)+'</th>'+
-    (showProjection?('<th class="left" style="width:'+cpoColWidths.projection+'px">能否如期完成</th>'):'')+
-    '</tr>';
-  var todayMs=new Date(new Date().toDateString()).getTime();
-  var bodyHtml=shown.map(function(g){
-    var open=!!cpoProgExpanded[g.key];
-    var expRangeLabel = g.minExpMs===null ? '-' :
-      (g.minExpMs===g.maxExpMs ? formatCpoExpDate('',g.minExpMs) : (formatCpoExpDate('',g.minExpMs)+' ~ '+formatCpoExpDate('',g.maxExpMs)));
-    var groupOverdue = g.minExpMs!==null && g.minExpMs<todayMs && g.packing<g.cpoQty-0.5;
-    var projCell=showProjection?('<td class="left">'+cpoProgProjectionBadgeHtml(g.projection)+'</td>'):'';
-    var headRow='<tr class="grp cpoprog-grp-row" onclick="toggleCpoProgGroup(\''+escJsStr(g.key)+'\')" title="點擊展開／收合 顏色×Exp Date 明細">'+
-      '<td class="left" title="'+escHtml(g.maker)+'">'+g.maker+'</td>'+
-      '<td class="left" title="'+escHtml(g.cust)+'">'+g.cust+'</td>'+
-      '<td class="left" title="'+escHtml(g.style)+'"><span class="cpoprog-caret">'+(open?'▾':'▸')+'</span> '+g.style+'</td>'+
-      '<td class="left">'+g.colorCount+' 色</td>'+
-      '<td'+(groupOverdue?' style="color:#fca5a5;font-weight:700"':'')+' title="'+expRangeLabel+(groupOverdue?'（最早的Exp Date已逾期尚未出貨完成）':'')+'">'+expRangeLabel+'</td>'+
-      '<td>'+Math.round(g.cpoQty).toLocaleString()+'</td>'+
-      cpoProgCellHtml(g.cutting,g.cpoQty,'cut',g.deltaCutting)+
-      cpoProgCellHtml(g.receiving,g.cpoQty,'eqc',g.deltaReceiving)+
-      cpoProgCellHtml(g.packing,g.cpoQty,'pack',g.deltaPacking)+
-      projCell+
-      '</tr>';
-    var detailRows='';
-    if(open){
-      detailRows=g.details.map(function(d){
-        var overdue = d.expMs!==null && d.expMs<todayMs && d.packing<d.cpoQty-0.5;
-        return '<tr class="sub">'+
-          '<td></td><td></td>'+
-          '<td class="left" style="padding-left:20px;color:#94a3b8" title="'+escHtml(g.style)+'">'+g.style+'</td>'+
-          '<td class="left" title="'+escHtml(d.color||'(無顏色)')+'">'+(d.color||'(無顏色)')+'</td>'+
-          '<td'+(overdue?' style="color:#dc2626;font-weight:700" title="已逾期尚未出貨完成"':'')+'>'+(formatCpoExpDate(d.expDate,d.expMs)||'-')+'</td>'+
-          '<td>'+Math.round(d.cpoQty).toLocaleString()+'</td>'+
-          cpoProgCellHtml(d.cutting,d.cpoQty,'cut',d.deltaCutting)+
-          cpoProgCellHtml(d.receiving,d.cpoQty,'eqc',d.deltaReceiving)+
-          cpoProgCellHtml(d.packing,d.cpoQty,'pack',d.deltaPacking)+
-          (showProjection?'<td class="left" style="color:#cbd5e1;font-size:10px">整款共用產能，不個別預估</td>':'')+
-          '</tr>';
-      }).join('');
-    }
-    return headRow+detailRows;
-  }).join('');
-  // Sums the SAME cpoColWidths object used to build theadHtml above, so this can never drift out of
-  // sync with the header widths the way a separately hand-maintained constant could — guarantees
-  // table-layout:fixed never has to shrink the progress-bar columns below what they need, regardless
-  // of window/panel width.
-  var cpoTableMinWidth = cpoColWidths.maker+cpoColWidths.cust+cpoColWidths.style+cpoColWidths.color+
-    cpoColWidths.expDate+cpoColWidths.cpoQty+cpoColWidths.cutting+cpoColWidths.receiving+cpoColWidths.packing+
-    (showProjection?cpoColWidths.projection:0);
-  document.getElementById('cpoprog-rows').innerHTML = groups.length ?
-    ('<div class="cpoprog-tablewrap"><table style="min-width:'+cpoTableMinWidth+'px"><thead>'+theadHtml+'</thead><tbody>'+bodyHtml+'</tbody></table></div>'+
-     '<div class="row-count">顯示 '+shown.length.toLocaleString()+' / '+groups.length.toLocaleString()+' 款'+(mk?'（工廠：'+mk+'）':'')+'</div>') :
-    '<div style="text-align:center;padding:2rem;color:#64748b">沒有符合條件的資料</div>';
 }
 
 function downloadCpoProg(){
-  if(!cpoProgSnapB||!cpoProgSnapB.details.length){alert('請先上傳今天的CPO生產進度明細檔（快照B）');return;}
-  var cutoffMs=cpoProgCutoffMs();
-  var aIndex=cpoProgBuildAIndex();
-  var rows=cpoProgSnapB.details.filter(function(r){return r.expMs===null || r.expMs>=cutoffMs;}).slice().sort(function(a,b){
-    if(a.maker!==b.maker)return a.maker<b.maker?-1:1;
-    if(a.style!==b.style)return a.style.localeCompare(b.style);
-    if(a.color!==b.color)return (a.color||'').localeCompare(b.color||'');
-    return (a.expMs||0)-(b.expMs||0);
-  });
-  var out=[['工廠','客戶','款式','顏色','Exp Date','CPO筆數','CPO數量','Cutting','Cutting%','Receiving','Receiving%','Packing','Packing%','Cutting較昨天','Receiving較昨天','Packing較昨天']];
-  rows.forEach(function(g){
-    var ord=g.cpoQty>0?g.cpoQty:1;
-    var aRec=aIndex?aIndex[g.key]:null;
-    out.push([g.maker,g.cust,g.style,g.color,formatCpoExpDate(g.expDate,g.expMs),g.cpoCount,Math.round(g.cpoQty),
-      Math.round(g.cutting),(g.cutting/ord*100).toFixed(1),
-      Math.round(g.receiving),(g.receiving/ord*100).toFixed(1),
-      Math.round(g.packing),(g.packing/ord*100).toFixed(1),
-      aIndex?Math.round(g.cutting-(aRec?aRec.cutting:0)):'',
-      aIndex?Math.round(g.receiving-(aRec?aRec.receiving:0)):'',
-      aIndex?Math.round(g.packing-(aRec?aRec.packing:0)):'']);
-  });
-  dlXLSX(out,'CPO生產進度明細.xlsx');
+  var active=cpoProgReports[cpoProgActiveFactory];
+  if(!active){alert('請先上傳生產進度報表（HTML）');return;}
+  var blob=new Blob([active.html],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url; a.download=active.fileName||'生產進度報表.html';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(url);},1000);
 }
 
 /* ===================== Hours & headcount tab ===================== */
@@ -5404,8 +4808,9 @@ function _doProcessAutoLoad(fileArr){
       if(!prev) prev = f;
     } else if(nl.indexOf('daily_all_factory_gld') >= 0 || nl.indexOf('daily all factory') >= 0){
       completion = f;
-    } else if(nl.indexOf('fifo_color_size') >= 0 || nl.indexOf('fifo color size') >= 0
-           || nl.indexOf('daily all fifo') >= 0 || nl.indexOf('daily_all_fifo') >= 0){
+    } else if(/\.(html|htm)$/i.test(n) && (nl.indexOf('生產進度') >= 0 || nl.indexOf('production progress') >= 0)){
+      // 工廠端每日匯出的「生產進度」HTML報表（例如「生產進度_INDGLD6_20260818.html」）－ CPO生產進度
+      // 分頁自 2026/08/18 起改為直接嵌入這份報表，不再讀取 Daily All FIFO_COLOR_SIZE 明細檔。
       cpoprogFiles.push(f);
     } else if(nl.indexOf('產能參數') >= 0 || nl.indexOf('productionplanning') >= 0
            || nl.indexOf('production planning') >= 0 || nl.indexOf('production_planning') >= 0
@@ -5498,28 +4903,13 @@ function _doProcessAutoLoad(fileArr){
     markSkip('WIP快照A'); markSkip('WIP快照B');
   }
 
-  // CPO生產進度：A = 較舊（昨天，用於比較增量）, B = 較新（今天）。
-  // outlook_fetcher.py 存檔時會把「今天／昨天」字樣直接寫進檔名（例如
-  // "CPO生產進度_今天_Daily All FIFO_COLOR_SIZE.csv"）——優先用這個標籤判斷，因為按檔名字母排序
-  //並不可靠：中文的「今」在Unicode順序上排在「昨」前面，字母排序會把"今天"誤判成較舊的A、"昨天"
-  // 誤判成較新的B，兩份快照就會整個對調。找不到標籤時（例如手動上傳、或舊版檔名）才退回用檔名排序。
-  var cpoA=null, cpoB=null;
-  var cpoTodayFiles = cpoprogFiles.filter(function(f){ return f.name.indexOf('今天') >= 0; });
-  var cpoYestFiles = cpoprogFiles.filter(function(f){ return f.name.indexOf('昨天') >= 0; });
-  if(cpoTodayFiles.length && cpoYestFiles.length){
-    cpoB = cpoTodayFiles[0]; cpoA = cpoYestFiles[0];
-  } else if(cpoprogFiles.length){
-    var cpoSorted = cpoprogFiles.slice().sort(function(a,b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
-    cpoA = cpoSorted[0]; cpoB = cpoSorted[cpoSorted.length-1];
-  }
-  if(cpoA && cpoB && cpoA!==cpoB){
-    handleCpoProgFile(cpoA, 'A'); markOk('CPO生產進度快照A：'+cpoA.name);
-    handleCpoProgFile(cpoB, 'B'); markOk('CPO生產進度快照B：'+cpoB.name);
-  } else if(cpoB || cpoA){
-    handleCpoProgFile(cpoB||cpoA, 'B'); markOk('CPO生產進度快照B：'+(cpoB||cpoA).name);
-    markSkip('CPO生產進度快照A');
+  // CPO生產進度：現在是嵌入工廠端已產出的完整「生產進度」HTML報表，本身就是單一份最新快照，
+  // 不需要再分今天/昨天兩份比對。可能同時有多個工廠各自一份（GLD5、GLD6...），全部載入，
+  // handleCpoProgFile() 內部會依檔名解析工廠代碼分別存放，互不覆蓋，並可在分頁裡切換查看。
+  if(cpoprogFiles.length){
+    cpoprogFiles.forEach(function(f){ simulateLoad('fi-cpoprog', f, handleCpoProgFile); });
   } else {
-    markSkip('CPO生產進度快照A'); markSkip('CPO生產進度快照B');
+    markSkip('CPO生產進度報表');
   }
 
   if(sewingFiles.length > 0){
