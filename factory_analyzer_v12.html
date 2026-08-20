@@ -5110,12 +5110,14 @@ function clrBuild(){
 
     var sk=r.mk+'|'+r.cust+'|'+r.style;
     var S=styles[sk];
+    // colorSet / pos 都是「不重複」的集合：同一個顏色會在多個出口日、多張 PO 重覆出現，
+    // 所以「色數」必須算相異顏色，不能算明細筆數（那會變成 顏色×PO×出口日 的總筆數）。
     if(!S)S=styles[sk]={key:sk,mk:r.mk,cust:r.cust,style:r.style,qty:0,cut:0,rcv:0,pack:0,
-                        d:{qty:0,cut:0,rcv:0,pack:0},exps:{},nColor:0,pos:{},minExp:'￿'};
+                        d:{qty:0,cut:0,rcv:0,pack:0},exps:{},colorSet:{},pos:{},nLeaf:0,minExp:'￿'};
     var ek=sk+'||'+r.exp;
     var E=S.exps[r.exp];
     if(!E)E=S.exps[r.exp]={key:ek,exp:r.exp,expDisp:r.expDisp,grp:r.grp,qty:0,cut:0,rcv:0,pack:0,
-                           d:{qty:0,cut:0,rcv:0,pack:0},colors:[],pos:{}};
+                           d:{qty:0,cut:0,rcv:0,pack:0},colors:[],colorSet:{},pos:{}};
     var row={mk:r.mk,cust:r.cust,style:r.style,exp:r.exp,expDisp:r.expDisp,grp:r.grp,po:r.po,color:r.color,
              ie:r.ie,qty:r.qty,cut:r.cut,sew:r.sew,rcv:r.rcv,pack:r.pack,d:d,changed:changed,isNew:isNewKey};
     E.colors.push(row);
@@ -5124,8 +5126,9 @@ function clrBuild(){
       X.qty+=r.qty; X.cut+=r.cut; X.rcv+=r.rcv; X.pack+=r.pack;
       X.d.qty+=d.qty; X.d.cut+=d.cut; X.d.rcv+=d.rcv; X.d.pack+=d.pack;
       X.pos[r.po]=1;
+      X.colorSet[r.color]=1;
     });
-    S.nColor++;
+    S.nLeaf++;
     if(r.exp&&r.exp<S.minExp)S.minExp=r.exp;
 
     tot.qty+=r.qty; tot.cut+=r.cut; tot.rcv+=r.rcv; tot.pack+=r.pack;
@@ -5152,10 +5155,11 @@ function clrBuild(){
   var list=Object.keys(styles).map(function(k){
     var S=styles[k];
     S.nPo=Object.keys(S.pos).length;
+    S.nColor=Object.keys(S.colorSet).length;   // 相異顏色數，不是明細筆數
     S.expList=Object.keys(S.exps).sort().map(function(e){
       var E=S.exps[e];
       E.nPo=Object.keys(E.pos).length;
-      E.nColor=E.colors.length;
+      E.nColor=Object.keys(E.colorSet).length;
       E.colors.sort(function(a,b){
         var da=Math.abs(a.d.pack)+Math.abs(a.d.cut), db=Math.abs(b.d.pack)+Math.abs(b.d.cut);
         if(db!==da)return db-da;
@@ -5198,7 +5202,7 @@ function clrBuild(){
     list.forEach(function(S){
       tot.qty+=S.qty; tot.cut+=S.cut; tot.rcv+=S.rcv; tot.pack+=S.pack;
       tot.dqty+=S.d.qty; tot.dcut+=S.d.cut; tot.drcv+=S.d.rcv; tot.dpack+=S.d.pack;
-      tot.colors+=S.nColor;
+      tot.colors+=S.nLeaf;
     });
     diff=diff.filter(function(r){return keep[r.mk+'|'+r.cust+'|'+r.style];});
     tot.changed=diff.length;
@@ -5339,15 +5343,22 @@ function renderClrTab(){
       var g=gmap[name];
       if(!g){
         g=gmap[name]={key:'GRP||'+groupBy+'||'+name, name:name, styles:[],
-                      qty:0,cut:0,rcv:0,pack:0,d:{qty:0,cut:0,rcv:0,pack:0},nColor:0,nPo:0};
+                      qty:0,cut:0,rcv:0,pack:0,d:{qty:0,cut:0,rcv:0,pack:0},
+                      colorSet:{},poSet:{},nColor:0,nPo:0};
         gorder.push(name);
       }
       g.styles.push(S);
       g.qty+=S.qty; g.cut+=S.cut; g.rcv+=S.rcv; g.pack+=S.pack;
       g.d.qty+=S.d.qty; g.d.cut+=S.d.cut; g.d.rcv+=S.d.rcv; g.d.pack+=S.d.pack;
-      g.nColor+=S.nColor; g.nPo+=S.nPo;
+      Object.keys(S.colorSet).forEach(function(c){g.colorSet[c]=1;});
+      Object.keys(S.pos).forEach(function(po){g.poSet[po]=1;});
     });
-    groups=gorder.map(function(n){return gmap[n];}).sort(function(a,b2){return b2.qty-a.qty;});
+    groups=gorder.map(function(n){
+      var g=gmap[n];
+      g.nColor=Object.keys(g.colorSet).length;   // 該客戶（工廠）用到的相異顏色數
+      g.nPo=Object.keys(g.poSet).length;
+      return g;
+    }).sort(function(a,b2){return b2.qty-a.qty;});
   }
 
   groups.forEach(function(G){
