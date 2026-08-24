@@ -5648,6 +5648,17 @@ function processAutoLoad(files){
   }
 }
 
+// 判斷一個檔案有多「新」：檔名裡的 YYYYMMDD / YYYY-MM-DD 最可靠，
+// 沒有的話（例如 "EXPORT SCHEDULE 0822.xlsx" 只有 MMDD）就用檔案的修改時間。
+function autoLoadFileTime(f){
+  var m=f.name.match(/(20\d{2})[-_]?(\d{2})[-_]?(\d{2})/);
+  if(m){
+    var mo=+m[2], da=+m[3];
+    if(mo>=1&&mo<=12&&da>=1&&da<=31)return Date.UTC(+m[1],mo-1,da);
+  }
+  return f.lastModified||0;
+}
+
 function _doProcessAutoLoad(fileArr){
   if(!fileArr.length){
     showAutoLoadResult('⚠ 資料夾為空，未找到任何檔案。\n請確認選取的資料夾內含週報 Excel 檔案。');
@@ -5678,7 +5689,14 @@ function _doProcessAutoLoad(fileArr){
   window._seenCapKeys = {}; // reset per-call to avoid stale keys on reload
 
   // Sort newest-first so first match = newest file
-  fileArr.sort(function(a,b){ return a.name < b.name ? 1 : a.name > b.name ? -1 : 0; });
+  // 排序依據：檔名裡的完整日期 > 檔案修改時間 > 檔名。
+  // 只用檔名排序會在跨年時出錯（例如 "EXPORT SCHEDULE 0105"（今年1月）會被排在
+  // "EXPORT SCHEDULE 1220"（去年12月）後面），所以優先看得出來的日期／修改時間。
+  fileArr.sort(function(a,b){
+    var ta=autoLoadFileTime(a), tb=autoLoadFileTime(b);
+    if(tb!==ta)return tb-ta;
+    return a.name < b.name ? 1 : a.name > b.name ? -1 : 0;
+  });
 
   fileArr.forEach(function(f){
     var n = f.name;
@@ -5688,7 +5706,7 @@ function _doProcessAutoLoad(fileArr){
     } else if(nl.indexOf('排單_上週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('上週') >= 0)){
       if(!prev) prev = f;
     } else if(nl.indexOf('daily_all_factory_gld') >= 0 || nl.indexOf('daily all factory') >= 0){
-      completion = f;
+      if(!completion) completion = f;   // 第一個符合＝最新（fileArr 已排新到舊）
     } else if(clrIsFifoFile(n)){
       // Daily All FIFO_COLOR_SIZE_*.csv／.xlsx －「進度控管」分頁；全部收集起來，稍後取最新兩個比對
       clrFiles.push(f);
@@ -5709,14 +5727,14 @@ function _doProcessAutoLoad(fileArr){
     } else if(nl.indexOf('target_per_hari') >= 0 || nl.indexOf('targetperhari') >= 0){
       sewingFiles.push(f);
     } else if(nl.indexOf('週工時分佈') >= 0 || nl.indexOf('hours_dist') >= 0){
-      hoursDist = f;
+      if(!hoursDist) hoursDist = f;
     } else if(nl.indexOf('gld 人力') >= 0 || nl.indexOf('gld_人力') >= 0 || nl.indexOf('tp_summary') >= 0 || nl.indexOf('tp summary') >= 0){
-      tpSummary = f;
+      if(!tpSummary) tpSummary = f;
     } else if(nl.indexOf('export schedule') >= 0 || nl.indexOf('export_schedule') >= 0){
-      exportSched = f;
+      if(!exportSched) exportSched = f;
     } else if(/^gld\d+[\s_]\d{4}\.(xlsx|xls)$/i.test(n) || /^gld\d+\s*\d{4}\.(xlsx|xls)$/i.test(n)){
       // Worksheet: e.g. "GLD6 0625.xlsx", "GLD5 0625.xlsx"
-      worksheet = f;
+      if(!worksheet) worksheet = f;
       worksheetFiles.push(f);
     }
   });
