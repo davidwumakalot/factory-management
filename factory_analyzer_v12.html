@@ -6647,9 +6647,16 @@ function handleEffTrendFile(file){
       var persons   =parseFloat(row[colPersons])||0;
       var ie        =parseFloat(row[colIe])||0;
       var stdOutput =colStd>=0&&row[colStd]!=null?parseFloat(row[colStd])||0:0;
-      // Per-style efficiency: pcs/jam ÷ STD output
-      // Falls back to file's prosentase if STD output column not present or zero
-      var styleEff=(stdOutput>0&&pcsJam>0)?(pcsJam/stdOutput):prosentase;
+      // 每一列的效率 = pcs/jam ÷ STD output。這個比值是「可相加」的：把同一組所有列加起來，
+      // 正好等於檔案裡那一組的 prosentase（已用 2026/08/27 GLD6 實檔逐組驗算，例如
+      // 6-08 的 0.7821 + 0.6198 = 1.4019 = 檔案的 140.2%）。
+      // 所以同款式拆成多列時要「相加」，不是取最大值——取最大值只會拿到其中一批的產出。
+      //
+      // 另外：只要這個檔案有 STD output 欄位就一律用它算，即使該列 pcs/jam = 0。
+      // 舊寫法在 pcs/jam=0 時會退回整組的 prosentase，等於把整組的效率算到一個
+      // 根本沒產出的款頭上（例如 6-02 的 X048GZ_C127 產出 0 卻顯示 148.8%）。
+      var effFromStd=(colStd>=0&&stdOutput>0);
+      var styleEff=effFromStd?(pcsJam/stdOutput):prosentase;
 
       // Sanity check: reject obviously wrong values to guard against misidentified files
       if(jkk>24||prosentase>5||persons>300||(jkk>0&&jkk<1))continue;
@@ -6675,11 +6682,15 @@ function handleEffTrendFile(file){
         lineData[curLine].allStyles.push(styleVal);
         lineData[curLine].totalTarget+=target;
         lineData[curLine].pcsJam+=pcsJam;
-        // Only record if style has actual production; keep max for same-style multi-IE sub-rows
         if(styleEff>0){
-          var _prevPro=lineData[curLine].perStyle[styleVal];
-          var _prevVal=(_prevPro!=null)?_prevPro:0;
-          if(styleEff>_prevVal) lineData[curLine].perStyle[styleVal]=styleEff;
+          var _prev=lineData[curLine].perStyle[styleVal];
+          if(effFromStd){
+            // 同款式分成多列（不同 IE／不同批次）：相加才是該款在這一組的實際效率
+            lineData[curLine].perStyle[styleVal]=(_prev!=null?_prev:0)+styleEff;
+          } else if(_prev==null||styleEff>_prev){
+            // 沒有 STD output 欄位時只能退回整組共用的 prosentase，那是同一個值，不能相加
+            lineData[curLine].perStyle[styleVal]=styleEff;
+          }
         }
         // Promote to primary if this style has higher JKK (more active)
         if(jkk>lineData[curLine].jkk){
@@ -6786,19 +6797,22 @@ function renderEffTrendTab(){
         histStyleSeries[sty][di]=(v!==null&&v!==undefined)?v:null;
       });
     });
-    // Flat series (primary style only) for week-avg and big-% display
-    // series: use max per-style efficiency per day (pcs/jam÷std), fallback to prosentase
-    function maxPerStyleEff(ld){
+    // 這一組當天的整體效率（大字％與週平均都用它）：
+    // 優先用檔案自己算好的 prosentase —— 它就等於該組所有列的效率總和，是最準的。
+    // 沒有的話再把各款效率加總。舊版取「各款最大值」，一組同時跑兩款時會少算另一款
+    // （例如 6-05 同時跑 CPW264TL38 2.4% 與 LPST840 113.6%，整組其實是 116.0%）。
+    function lineEff(ld){
       if(!ld)return null;
+      if(ld.prosentase>0)return ld.prosentase;
       var ps=ld.perStyle||{};
-      var vals=Object.keys(ps).map(function(k){return ps[k]||0;}).filter(function(v){return v>0;});
-      if(vals.length)return Math.max.apply(null,vals);
-      return ld.prosentase>0?ld.prosentase:null;
+      var sum=0;
+      Object.keys(ps).forEach(function(k){sum+=ps[k]||0;});
+      return sum>0?sum:null;
     }
     var series=dates.map(function(d,di){
       var day=myDays[di];
       var ld=day&&day.lines[line];
-      return maxPerStyleEff(ld);
+      return lineEff(ld);
     });
     // Assign a color to each unique style across all days
     var stylePalette=['#3b82f6','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6'];
@@ -6811,7 +6825,7 @@ function renderEffTrendTab(){
     // Will be populated after projStylePerDay is computed (see below after PP section)
 
     // curPro: use max per-style efficiency (pcs/jam÷std) instead of line-level prosentase
-    var curPro=maxPerStyleEff(latestD)||latestD.prosentase;
+    var curPro=lineEff(latestD)||latestD.prosentase;
     // Weekly average efficiency
     var validSeries=series.filter(function(v){return v!==null;});
     var weekAvgPro=validSeries.length?validSeries.reduce(function(s,v){return s+v;},0)/validSeries.length:null;
