@@ -6564,6 +6564,62 @@ function clearEffTrendData(){
   document.getElementById('eff-trend-files-info').textContent='尚未上傳（可一次上傳多個，最多保留7天）';
 }
 
+/* ---- 款號歸群（效率趨勢用） --------------------------------------------------
+   同一個款號，客戶／季節／批次代碼常常不一樣：
+     MAX233402_Q426 / MAX233402CUT426 / MAX233402_Q127   → 都是 MAX233402
+     W9ZMM8_7PK_C426/1-Panties … /7-Panties              → 都是 W9ZMM8_7PK_C426
+     766362_HO26 / 766362_V1                             → 都是 766362
+   這些在同一組裡其實是同一個款，效率要合在一起看，不該拆成好幾條線。
+
+   作法是先算出每個款號的「基底」：切掉 / 之後的部分，再由後往前拿掉季節／客戶／
+   批次代碼（C426、Q127、HO26、FA26、26Q4、VMI、V1、HT、7PK…），最後處理沒有底線
+   黏在一起的情況（MAX233402CUT426 → MAX233402）。基底相同才算同款。
+
+   刻意不用「共同開頭夠長就合併」那種寫法：CPM263PA05_26Q4 與 CPM263TL32_26Q4 共同
+   開頭有 6 碼卻是不同款，那樣會誤併。基底法算出來分別是 CPM263PA05 / CPM263TL32，
+   不會混在一起。 */
+function effStyleBase(styleName){
+  var s=String(styleName||'').trim();
+  if(!s)return s;
+  s=s.split('/')[0].trim();
+  var parts=s.split(/[_\s]+/).filter(Boolean);
+  function isSuffix(t){
+    var u=t.toUpperCase();
+    if(/^[A-Z]{1,4}\d{2,4}[A-Z]{0,4}$/.test(u))return true;  // C426 / Q127 / HO26 / FA26 / C127IND / HO26DIS
+    if(/^\d{2}[A-Z]\d$/.test(u))return true;                 // 26Q4
+    if(/^[A-Z]{1,3}$/.test(u))return true;                    // HT / SL / VMI / DIS / IND
+    if(/^\d[A-Z]{2,3}$/.test(u))return true;                  // 3PC / 7PK
+    if(/^[A-Z]\d{1,2}$/.test(u))return true;                  // V1 / V2
+    return false;
+  }
+  while(parts.length>1&&isSuffix(parts[parts.length-1]))parts.pop();
+  var base=parts.join('_');
+  // 黏在一起的季節碼：MAX233402CUT426 → MAX233402（剩下的要有 4 碼以上才切，
+  // 否則 LPST840 會被切成 LP、ZC6HY000 會被切成 ZC6）
+  var m=base.match(/^(.+?)([A-Z]{2,4}\d{3,4})$/);
+  if(m&&m[1].length>=4)base=m[1];
+  return base;
+}
+
+// 一群同款的顯示名稱：取它們的共同開頭（比基底好讀），太短才退回基底
+function effGroupLabel(members){
+  if(members.length===1)return members[0];
+  var p=members[0];
+  for(var i=1;i<members.length;i++){
+    var o=members[i], n=Math.min(p.length,o.length), k=0;
+    while(k<n&&p.charAt(k)===o.charAt(k))k++;
+    p=p.slice(0,k);
+  }
+  var trimmed=p.replace(/[_\-\/ .]+$/,'');
+  // 共同開頭必須在每個成員都剛好斷在分隔符（或結尾），否則會切出 "MAX233402_Q"
+  // 這種半截名稱；那種情況直接用基底當名稱。
+  var clean=trimmed.length>=3&&members.every(function(m){
+    var c=m.charAt(trimmed.length);
+    return c===''||'_-/ .'.indexOf(c)>=0;
+  });
+  return clean?trimmed:effStyleBase(members[0]);
+}
+
 // Parse a single Target Per Hari xlsx file and add/update its day in effTrendDays
 function handleEffTrendFile(file){
   var reader=new FileReader();
@@ -6783,7 +6839,7 @@ function renderEffTrendTab(){
     if(lowOnly&&latestD.prosentase>=1.0)return;
 
     // Build per-style series: {style: [v0,v1,...,vN]} (null=not in file, 0=on line but no output)
-    var histStyleSeries={};
+    var histStyleSeriesRaw={};
     dates.forEach(function(d,di){
       var day=myDays[di];
       var ld=day&&day.lines[line];
@@ -6792,9 +6848,35 @@ function renderEffTrendTab(){
       // backward compat: if no perStyle, synthesize from primaryStyle (only if prosentase > 0)
       if(!Object.keys(src).length&&ld.primaryStyle&&ld.prosentase>0){src={};src[ld.primaryStyle]=ld.prosentase;}
       Object.keys(src).forEach(function(sty){
-        if(!histStyleSeries[sty])histStyleSeries[sty]=new Array(dates.length).fill(null);
+        if(!histStyleSeriesRaw[sty])histStyleSeriesRaw[sty]=new Array(dates.length).fill(null);
         var v=src[sty];
-        histStyleSeries[sty][di]=(v!==null&&v!==undefined)?v:null;
+        histStyleSeriesRaw[sty][di]=(v!==null&&v!==undefined)?v:null;
+      });
+    });
+
+    // 同款不同季節／批次代碼合併成一條線（見 effStyleBase 的說明）。
+    // 合併是跨「所有顯示中的日期」一起做的：某一天只出現 MAX233402_Q426、另一天出現
+    // MAX233402CUT426，如果各自成群就會變成兩條線，所以要先把整週的款號收齊再分群。
+    var _rawStyles=Object.keys(histStyleSeriesRaw);
+    var _members={};
+    _rawStyles.forEach(function(sty){
+      var b=effStyleBase(sty);
+      (_members[b]=_members[b]||[]).push(sty);
+    });
+    var baseToLabel={}, rawToLabel={};
+    Object.keys(_members).forEach(function(b){
+      var lab=effGroupLabel(_members[b]);
+      baseToLabel[b]=lab;
+      _members[b].forEach(function(sty){rawToLabel[sty]=lab;});
+    });
+    var histStyleSeries={};
+    _rawStyles.forEach(function(sty){
+      var lab=rawToLabel[sty];
+      if(!histStyleSeries[lab])histStyleSeries[lab]=new Array(dates.length).fill(null);
+      histStyleSeriesRaw[sty].forEach(function(v,di){
+        if(v===null||v===undefined)return;
+        var cur=histStyleSeries[lab][di];
+        histStyleSeries[lab][di]=(cur===null?0:cur)+v;
       });
     });
     // 這一組當天的整體效率（大字％與週平均都用它）：
@@ -6903,7 +6985,12 @@ function renderEffTrendTab(){
       return getEffEntryForDay(dMs);
     });
     var projSeries2=projEntries2.map(function(e){return e?Math.round(e.eff*100)/100:null;});
-    var projStylePerDay=projEntries2.map(function(e){return e?e.style:null;});
+    // 投影款號套用同一套合併規則，才不會跟歷史款號被畫成兩條不同的線
+    var projStylePerDay=projEntries2.map(function(e){
+      if(!e||!e.style)return null;
+      var b=effStyleBase(e.style);
+      return baseToLabel[b]||e.style;
+    });
     var projectedPro=projSeries2.find(function(v){return v!==null;})||null;
     var projPct=projectedPro?Math.round(projectedPro*100):null;
 
