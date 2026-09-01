@@ -5094,13 +5094,26 @@ function clrBuild(){
     return true;
   }
 
-  var styles={}, diff=[];
-  var tot={qty:0,cut:0,rcv:0,pack:0,dqty:0,dcut:0,drcv:0,dpack:0,colors:0,changed:0};
+  var styles={}, diff=[], leafByColor={};
+  var tot={qty:0,cut:0,rcv:0,pack:0,dqty:0,dcut:0,drcv:0,dpack:0,colors:0,changed:0,
+           gone:{n:0,qty:0,cut:0,rcv:0,pack:0},      // 已出貨移出清單（不計入增量）
+           moved:{n:0,qty:0,cut:0,rcv:0}};           // 未包裝就移出＝換 PO／取消（已回沖）
+
+  // 比對「同一張訂單」用的身分：工廠｜客戶｜款號｜PO｜顏色 —— 刻意不含出口日。
+  // 出口日會被改（改船期），一旦放進比對鍵，同一張 PO 改了船期就會被判定成
+  // 「舊的消失 ＋ 新的出現」，昨天早就完成的量會整批被算成今天的增量。
+  // 實測 2026/08/27 → 08/28 兩個檔案：含出口日時「新增」875 筆、帶著 1,438,970 件包裝量；
+  // 改成不含出口日之後只剩 371 筆、13,257 件，才是真正的新單。
+  // （這兩個檔案裡同一組 PO+顏色 一定只對應一個出口日，所以這個鍵是 1 對 1，不會把資料併錯）
+  function clrOrderKey(r){return r.mk+'|'+r.cust+'|'+r.style+'|'+r.po+'|'+r.color;}
+  var oldByOrder={}, newByOrder={};
+  if(hasOld)Object.keys(om).forEach(function(k){oldByOrder[clrOrderKey(om[k])]=om[k];});
+  Object.keys(nm).forEach(function(k){newByOrder[clrOrderKey(nm[k])]=1;});
 
   Object.keys(nm).forEach(function(k){
     var r=nm[k];
     if(!pass(r))return;
-    var o=hasOld?om[k]:null;
+    var o=hasOld?oldByOrder[clrOrderKey(r)]:null;
     var d={qty:r.qty-(o?o.qty:0), cut:r.cut-(o?o.cut:0), rcv:r.rcv-(o?o.rcv:0), pack:r.pack-(o?o.pack:0)};
     var isNewKey=hasOld&&!o;
     var changed=hasOld&&(d.qty!==0||d.cut!==0||d.rcv!==0||d.pack!==0);
@@ -5121,6 +5134,9 @@ function clrBuild(){
     var row={mk:r.mk,cust:r.cust,style:r.style,exp:r.exp,expDisp:r.expDisp,grp:r.grp,po:r.po,color:r.color,
              ie:r.ie,qty:r.qty,cut:r.cut,sew:r.sew,rcv:r.rcv,pack:r.pack,d:d,changed:changed,isNew:isNewKey};
     E.colors.push(row);
+    // 供「換 PO 回沖」用：同一個 款+顏色 今天還在的葉節點
+    var ck=r.mk+'|'+r.cust+'|'+r.style+'|'+r.color;
+    (leafByColor[ck]=leafByColor[ck]||[]).push({row:row,E:E,S:S});
 
     [S,E].forEach(function(X){
       X.qty+=r.qty; X.cut+=r.cut; X.rcv+=r.rcv; X.pack+=r.pack;
@@ -5134,23 +5150,54 @@ function clrBuild(){
     tot.qty+=r.qty; tot.cut+=r.cut; tot.rcv+=r.rcv; tot.pack+=r.pack;
     tot.dqty+=d.qty; tot.dcut+=d.cut; tot.drcv+=d.rcv; tot.dpack+=d.pack;
     tot.colors++;
-    if(changed)diff.push(row);
+    if(changed){tot.changed++;diff.push(row);}
   });
 
-  // 只存在於舊檔的 key ＝ 今天消失（PO 取消或轉單），列入異動清單（負數）
+  // 昨天有、今天整張不見的訂單分兩種，處理方式完全不同：
+  //
+  //  (1) 離開時「已經包裝過」→ 出貨了，來源系統把它移出 FIFO 清單。
+  //      這種絕對不能拿去扣增量：實測那天有 3,066 張、478 萬件已包裝的單離開，
+  //      扣下去「昨日增量」會變成 -480 萬，看起來像產線倒退，其實只是已出貨被清掉。
+  //      → 只列進異動清單並單獨統計 tot.gone，不動增量。
+  //
+  //  (2) 離開時「完全沒有包裝」→ 這批工作沒有出貨，而是被搬到別張 PO 了（換單號／取消）。
+  //      例如 2026/08/28 的 777362_VMI：25 張 USRTL_777362_VMI... 整批消失（裁剪 32,512、
+  //      包裝 0），同一天 USOL_777362_VMI... 增加裁剪 34,114 —— 是同一批貨換了 PO 號，
+  //      不是真的多裁了 3 萬件。這種要回沖，把量退回同一個 款+顏色 還在的葉節點，
+  //      該款當天的增量才會回到檔案的真實差額（實測回沖後 CUT +1,602，與檔案完全一致）。
   if(hasOld){
     Object.keys(om).forEach(function(k){
-      if(nm[k])return;
       var o=om[k];
+      if(newByOrder[clrOrderKey(o)])return;   // 只是出口日被改掉，不算消失
       if(!pass(o))return;
+      var moved=(o.pack<=0);                  // 沒包裝過就離開 ＝ 換 PO／取消
       diff.push({mk:o.mk,cust:o.cust,style:o.style,exp:o.exp,expDisp:o.expDisp,grp:o.grp,po:o.po,color:o.color,
                  ie:o.ie,qty:0,cut:0,sew:0,rcv:0,pack:0,
-                 d:{qty:-o.qty,cut:-o.cut,rcv:-o.rcv,pack:-o.pack},changed:true,removed:true});
-      // 消失的 PO 也要計入總增量，這樣 KPI 的「昨日 +N」＝今天檔案總量 − 昨天檔案總量，數字才對得起來
+                 d:{qty:-o.qty,cut:-o.cut,rcv:-o.rcv,pack:-o.pack},
+                 changed:true,removed:true,moved:moved});
+      if(!moved){
+        tot.gone.n++; tot.gone.qty+=o.qty; tot.gone.cut+=o.cut; tot.gone.rcv+=o.rcv; tot.gone.pack+=o.pack;
+        return;
+      }
+      // 回沖：找同一個 款+顏色 今天還在的葉節點（優先同一個出口日，否則挑量最大的）
+      tot.moved.n++; tot.moved.qty+=o.qty; tot.moved.cut+=o.cut; tot.moved.rcv+=o.rcv;
+      var cands=leafByColor[o.mk+'|'+o.cust+'|'+o.style+'|'+o.color];
+      var tgt=null;
+      if(cands&&cands.length){
+        for(var ci=0;ci<cands.length;ci++){if(cands[ci].row.exp===o.exp){tgt=cands[ci];break;}}
+        if(!tgt){tgt=cands.reduce(function(x,y){return y.row.qty>x.row.qty?y:x;});}
+      }
+      if(tgt){
+        tgt.row.d.qty-=o.qty; tgt.row.d.cut-=o.cut; tgt.row.d.rcv-=o.rcv; tgt.row.d.pack-=o.pack;
+        tgt.row.hasWriteback=true;
+        [tgt.E,tgt.S].forEach(function(X){
+          X.d.qty-=o.qty; X.d.cut-=o.cut; X.d.rcv-=o.rcv; X.d.pack-=o.pack;
+        });
+      }
+      // 不管有沒有找到對應的葉節點，總計都要回沖，這樣標頭的合計才等於實際差額
       tot.dqty-=o.qty; tot.dcut-=o.cut; tot.drcv-=o.rcv; tot.dpack-=o.pack;
     });
   }
-  tot.changed=diff.length;
 
   var list=Object.keys(styles).map(function(k){
     var S=styles[k];
@@ -5198,14 +5245,15 @@ function clrBuild(){
       return false;
     });
     // 合計要跟著只算留下來的款，否則標頭與 KPI 會跟畫面對不起來
-    tot={qty:0,cut:0,rcv:0,pack:0,dqty:0,dcut:0,drcv:0,dpack:0,colors:0,changed:0};
+    var _gone=tot.gone, _moved=tot.moved;
+    tot={qty:0,cut:0,rcv:0,pack:0,dqty:0,dcut:0,drcv:0,dpack:0,colors:0,changed:0,gone:_gone,moved:_moved};
     list.forEach(function(S){
       tot.qty+=S.qty; tot.cut+=S.cut; tot.rcv+=S.rcv; tot.pack+=S.pack;
       tot.dqty+=S.d.qty; tot.dcut+=S.d.cut; tot.drcv+=S.d.rcv; tot.dpack+=S.d.pack;
       tot.colors+=S.nLeaf;
     });
     diff=diff.filter(function(r){return keep[r.mk+'|'+r.cust+'|'+r.style];});
-    tot.changed=diff.length;
+    tot.changed=diff.filter(function(r){return !r.removed;}).length;
   }
 
   var dsort=clrVal('clr-diff-sort')||'pack';
@@ -5306,6 +5354,10 @@ function renderClrTab(){
     '<div class="clr-kpi-card"><div class="clr-kpi-label">Cutting</div><div class="clr-kpi-val">'+clrFmt(t.cut)+'</div><div class="clr-kpi-sub">'+pctOf(t.cut)+(showD&&t.dcut>0.5?'　<span style="color:#16a34a">昨日 +'+clrFmt(t.dcut)+'</span>':'')+'</div></div>'+
     '<div class="clr-kpi-card"><div class="clr-kpi-label">Receiving</div><div class="clr-kpi-val">'+clrFmt(t.rcv)+'</div><div class="clr-kpi-sub">'+pctOf(t.rcv)+(showD&&t.drcv>0.5?'　<span style="color:#16a34a">昨日 +'+clrFmt(t.drcv)+'</span>':'')+'</div></div>'+
     '<div class="clr-kpi-card"><div class="clr-kpi-label">Packing</div><div class="clr-kpi-val">'+clrFmt(t.pack)+'</div><div class="clr-kpi-sub">'+pctOf(t.pack)+(showD&&t.dpack>0.5?'　<span style="color:#16a34a">昨日 +'+clrFmt(t.dpack)+'</span>':'')+'</div></div>'+
+    (showD&&t.gone&&t.gone.n?
+      '<div class="clr-kpi-card"><div class="clr-kpi-label">已出貨移出</div><div class="clr-kpi-val" style="color:#64748b">'+t.gone.n.toLocaleString()+'</div><div class="clr-kpi-sub" title="昨天有、今天整張不在檔案裡，而且離開時已經包裝過的訂單。來源系統會把已出貨的單移出 FIFO 清單，這些量不列入昨日增量。">筆・'+clrFmt(t.gone.pack)+' 件已包裝<br>（不計入增量）</div></div>':'')+
+    (showD&&t.moved&&t.moved.n?
+      '<div class="clr-kpi-card"><div class="clr-kpi-label">換 PO／取消</div><div class="clr-kpi-val" style="color:#b45309">'+t.moved.n.toLocaleString()+'</div><div class="clr-kpi-sub" title="昨天有、今天整張不見，而且離開時完全沒有包裝過的訂單 —— 這批工作沒出貨，是被搬到別張 PO 了。已從增量中回沖，避免接收的那張 PO 看起來暴增。">筆・已裁 '+clrFmt(t.moved.cut)+'<br>（已從增量回沖）</div></div>':'')+
     '<div class="clr-kpi-card"><div class="clr-kpi-label">比對檔案</div><div class="clr-kpi-sub" style="color:#1e293b;font-size:11px;line-height:1.6">今天：'+escHtml(_snaps.cur?_snaps.cur.fileName:'—')+'<br>昨天：'+escHtml(_snaps.prev?_snaps.prev.fileName:'（未載入）')+'</div></div>';
   document.getElementById('clr-kpi').innerHTML=kpi;
 
@@ -5428,7 +5480,9 @@ function renderClrTab(){
     '共 '+b.styles.length.toLocaleString()+' 款（顯示前 '+Math.min(topN,b.styles.length)+' 款）・'+
     t.colors.toLocaleString()+' 筆 顏色/PO'+
     (b.hidden?'　｜　已隱藏 '+b.hidden.toLocaleString()+' 款未生產（無 Cutting）':'')+
-    (showD?'　｜　昨日有異動 '+t.changed.toLocaleString()+' 筆':'　｜　尚未載入前一份檔案，無法計算昨日增量');
+    (showD?'　｜　昨日有異動 '+t.changed.toLocaleString()+' 筆':'　｜　尚未載入前一份檔案，無法計算昨日增量')+
+    (showD&&t.gone&&t.gone.n?'　｜　'+t.gone.n.toLocaleString()+' 筆已出貨移出（不計入增量）':'')+
+    (showD&&t.moved&&t.moved.n?'　｜　'+t.moved.n.toLocaleString()+' 筆換 PO／取消（已回沖 '+clrFmt(t.moved.cut)+' 裁剪）':'');
 
 }
 
