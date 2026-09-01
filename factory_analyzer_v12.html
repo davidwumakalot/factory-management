@@ -563,6 +563,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
       <div class="cap-warning" id="cap-qtyie-warning" style="display:none">
         ⚠ 本週排單檔案中偵測不到「CPO_QTYIE」欄位，訂單量目前顯示為 0，請確認上傳的排單檔案是否包含此欄位。
       </div>
+      <div id="cap-order-src" style="font-size:11px;color:#64748b;margin-bottom:10px"></div>
 
       <div class="overview-filter-bar">
         <div class="filter-group"><label>工廠 (MK)</label>
@@ -3326,20 +3327,59 @@ function renderRanking(){
 }
 
 /* ===================== Capacity tab: data helpers ===================== */
+// 訂單量的來源：優先用 Daily All FIFO_COLOR_SIZE（進度控管分頁載入的那份），
+// 沒載入才退回排單檔的 CPO_QTYIE。
+//
+// 為什麼要換：排單檔只留「還沒結案」的訂單，已出貨的單會從裡面消失；但完成量來自
+// 先進先出明細的 Sewingx IE DZ，累計值會一直留著。越舊的期別分母掉得越快，達成率就爆高。
+// 實測 GLD6 2026-09 上旬：排單檔訂單量 6,993、完成量 23,239 → 達成率 332%、剩餘量 -16,246；
+// 改用 FIFO 檔後訂單量 25,060 → 達成率 92.7%、剩餘量 +1,821，才是合理的數字。
+// （10/11/12 月兩邊本來就差不多：FIFO 54,070/70,545/54,983 vs 排單 52,129/70,995/55,473，
+//   差異只出在已出貨的舊期別，正好印證是分母被掏空。）
+function clrOrderSourceReady(){
+  var sn=clrSnaps();
+  return !!(sn.cur&&sn.cur.map&&Object.keys(sn.cur.map).length);
+}
 function curRawHasQtyIE(){
+  if(clrOrderSourceReady())return true;
   if(!curRaw)return false;
   return Object.values(curRaw.map).some(function(e){return (e.totalQtyIE||0)>0;});
 }
 function allCapMks(){
   var s={};
+  if(clrOrderSourceReady()){
+    var cm=clrSnaps().cur.map;
+    Object.keys(cm).forEach(function(k){if(cm[k].mk)s[cm[k].mk]=1;});
+  }
   if(curRaw)Object.values(curRaw.map).forEach(function(e){if(e.mk)s[e.mk]=1;});
   if(completionRaw)Object.keys(completionRaw.data).forEach(function(mk){s[mk]=1;});
   Object.keys(capFileData).forEach(function(mk){s[mk]=1;});
   return Object.keys(s).sort();
 }
+// 逐筆跑 FIFO 檔的訂單量（已是 IE DZ），依出口日分到「月」與「旬」
+// cb(ym, subKey, cust, iedz)
+function clrEachOrderIEDZ(mk,cb){
+  var sn=clrSnaps();
+  if(!sn.cur)return;
+  var m=sn.cur.map;
+  Object.keys(m).forEach(function(k){
+    var r=m[k];
+    if(mk&&r.mk!==mk)return;
+    if(!r.exp||!r.iedz)return;
+    var ym=r.exp.slice(0,7);
+    if(!isValidYM(ym))return;
+    var day=parseInt(r.exp.slice(8,10),10)||0;
+    var sub=day<=10?1:(day<=20?2:3);
+    cb(ym,subKey(ym,sub),r.cust,r.iedz);
+  });
+}
 // {ym: qty} — sums this-week CPO_QTYIE order quantity across all customers/styles for one MK
 function orderQtyIEByMk(mk){
   var out={};
+  if(clrOrderSourceReady()){
+    clrEachOrderIEDZ(mk,function(ym,sk,cust,v){out[ym]=(out[ym]||0)+v;});
+    return out;
+  }
   if(!curRaw)return out;
   Object.values(curRaw.map).forEach(function(e){
     if(e.mk!==mk)return;
@@ -3350,6 +3390,13 @@ function orderQtyIEByMk(mk){
 // {cust: {ym: qty}} — same, broken down by customer
 function orderQtyIEByMkCust(mk){
   var out={};
+  if(clrOrderSourceReady()){
+    clrEachOrderIEDZ(mk,function(ym,sk,cust,v){
+      if(!out[cust])out[cust]={};
+      out[cust][ym]=(out[cust][ym]||0)+v;
+    });
+    return out;
+  }
   if(!curRaw)return out;
   Object.values(curRaw.map).forEach(function(e){
     if(e.mk!==mk)return;
@@ -3379,6 +3426,10 @@ function getCapPeriods(mk){
 // {subKey('YYYY-MM-S'): qty} — this-week order quantity by 旬 (1=上旬,2=中旬,3=下旬), for one MK
 function orderQtyIEByMkSub(mk){
   var out={};
+  if(clrOrderSourceReady()){
+    clrEachOrderIEDZ(mk,function(ym,sk,cust,v){out[sk]=(out[sk]||0)+v;});
+    return out;
+  }
   if(!curRaw)return out;
   Object.values(curRaw.map).forEach(function(e){
     if(e.mk!==mk)return;
@@ -3569,12 +3620,19 @@ function onCapMkChange(){
 
 /* ===================== Capacity tab: render ===================== */
 function renderCapacityTab(){
-  var capReady=!!curRaw;
+  var capReady=!!curRaw||clrOrderSourceReady();
   document.getElementById('capacity-empty-hint').style.display=capReady?'none':'flex';
   document.getElementById('capacity-content').style.display=capReady?'block':'none';
-  if(!curRaw)return;
+  if(!capReady)return;
   populateCapMkSelect();
   document.getElementById('cap-qtyie-warning').style.display=curRawHasQtyIE()?'none':'flex';
+  var _src=document.getElementById('cap-order-src');
+  if(_src){
+    _src.innerHTML=clrOrderSourceReady()
+      ? '訂單量來源：<b>Daily All FIFO_COLOR_SIZE</b>（'+escHtml(clrSnaps().cur.fileName)+'）　CPO_QTY ÷ 12 × IE 換成 IE DZ，依 EXP_DATE 分上（1–10）／中（11–20）／下旬（21–）。'
+        +'完成量來源：先進先出明細的 Sewingx IE DZ。'
+      : '訂單量來源：<b>本週排單</b>的 CPO_QTYIE。<span style="color:#b45309">提醒：排單檔只留還沒結案的訂單，已出貨的單會消失，舊期別的達成率會偏高；載入「進度控管」的 FIFO 檔後會自動改用它。</span>';
+  }
   var mk=capMkSelected;
   if(!mk){
     document.getElementById('cap-params-tbody').innerHTML='<tr><td colspan="8" style="text-align:center;padding:2rem;color:#64748b">無工廠(MK)資料</td></tr>';
@@ -4899,9 +4957,15 @@ function clrParseText(text, fileName, lastModified){
     var rec=map[key];
     if(!rec){
       rec=map[key]={mk:mk,cust:cust,style:style,exp:exp,expDisp:e?e.disp:'—',grp:grp,po:po,color:color,
-                    ie:cIe>=0?String(f[cIe]||'').trim():'',qty:0,cut:0,sew:0,rcv:0,pack:0};
+                    ie:cIe>=0?String(f[cIe]||'').trim():'',qty:0,iedz:0,cut:0,sew:0,rcv:0,pack:0};
     }
-    rec.qty+=clrNum(f[cQty]);
+    // IE DZ ＝ 件數 / 12 * IE。「訂單與產能」分頁的訂單量用這個單位，才能跟完成量
+    // （先進先出明細的 Sewingx IE DZ）比較。IE 逐列讀 —— 同一個 顏色/PO 群組內 IE 其實
+    // 是固定的（用 2026/08/27 原始檔 13,753 個群組驗過，100% 只有一個值），
+    // 但這樣寫即使將來 IE 依尺碼不同也不會算錯。
+    var _q=clrNum(f[cQty]);
+    rec.iedz+=_q/12*(cIe>=0?clrNum(f[cIe]):0);
+    rec.qty+=_q;
     if(cCut>=0)rec.cut+=clrNum(f[cCut]);
     if(cSew>=0)rec.sew+=clrNum(f[cSew]);
     if(cRcv>=0)rec.rcv+=clrNum(f[cRcv]);
@@ -4946,6 +5010,8 @@ function clrLoadFile(file, slot){
                    (clrSnapNew&&clrSnapOld?'　→ 已可比對昨日增量':'　（再載入另一份即可比對增量）'));
       clrResetFilters();
       renderClrTab();
+      // 「訂單與產能」的訂單量現在也吃這份檔案，載入後一起刷新
+      if(typeof renderCapacityTab==='function')renderCapacityTab();
     }catch(err){
       if(lab)lab.textContent='';
       clrSetStatus('❌ '+file.name+' 解析失敗：'+err.message,true);
