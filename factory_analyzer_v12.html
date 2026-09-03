@@ -433,7 +433,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
         </div>
         <div class="chart-row">
           <div class="chart-card full">
-            <div class="chart-title">各月出口 PCS：上週 vs 本週（滑鼠移到柱狀圖上可同時看到標打數）</div>
+            <div class="chart-title">各月出口 PCS：上週 vs 本週（柱高與上方增減都是 PCS；柱內灰字為對應的標打數 CPO_QTYIE，滑鼠移上去可看完整數字）</div>
             <div style="position:relative;height:280px"><canvas id="c-compare"></canvas></div>
           </div>
         </div>
@@ -3207,7 +3207,8 @@ function buildCompareChart(){
       },
       scales:{
         x:{ticks:{autoSkip:false,maxRotation:45,font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}},
-        y:{ticks:{callback:function(v){return v>=1000?Math.round(v/1000)+'k':v;},font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}}
+        // grace 留 12% 頂部空間，最高的那一柱上面才放得下「增減 + 標打增減」兩行字
+        y:{grace:'12%',ticks:{callback:function(v){return v>=1000?Math.round(v/1000)+'k':v;},font:{size:10},color:'#64748b'},grid:{color:'#f1f5f9'}}
       }
     },
     plugins:[{
@@ -3221,37 +3222,62 @@ function buildCompareChart(){
         c.save();
         c.textAlign='center';
 
-        // 標打數 label inside each bar
-        function drawInside(bars,qArr){
+        // 柱高是 PCS，所以柱內的主要數字與上方的增減也一律用 PCS，
+        // 標打數（CPO_QTYIE）當次要資訊放在下面一行的灰字。
+        // 以前柱高用 PCS、柱內數字與增減卻用標打數，兩者可以反向
+        // （例如款式組合換成 IE 較低的款，PCS 增加但標打減少），
+        // 就會出現「標示 -2k 但柱子反而比較高」這種看起來自相矛盾的畫面。
+        var pcsPrev=chart.data.datasets[0].data||[];
+        var pcsCur=chart.data.datasets[1].data||[];
+        function fmtK(v){
+          var a=Math.abs(v);
+          return a>=1000000?(Math.round(a/100000)/10)+'M':a>=1000?Math.round(a/1000)+'k':a.toLocaleString();
+        }
+        function drawInside(bars,pArr,qArr){
           bars.forEach(function(bar,i){
-            var v=Math.round(qArr[i]||0);
-            if(!v)return;
+            var pv=Math.round(pArr[i]||0), qv=Math.round(qArr[i]||0);
+            if(!pv&&!qv)return;
             var barH=bar.base-bar.y;
             if(barH<14)return;
-            var lbl=v>=1000?Math.round(v/1000)+'k':v.toLocaleString();
-            c.font='bold 9px sans-serif';
             c.textBaseline='middle';
-            c.fillStyle='rgba(255,255,255,0.92)';
-            c.fillText(lbl,bar.x,bar.y+barH/2);
+            if(barH>=26&&qv){
+              c.font='bold 9px sans-serif';
+              c.fillStyle='rgba(255,255,255,0.95)';
+              c.fillText(fmtK(pv),bar.x,bar.y+barH/2-5);
+              c.font='8px sans-serif';
+              c.fillStyle='rgba(255,255,255,0.62)';
+              c.fillText(fmtK(qv),bar.x,bar.y+barH/2+6);
+            } else {
+              c.font='bold 9px sans-serif';
+              c.fillStyle='rgba(255,255,255,0.95)';
+              c.fillText(fmtK(pv||qv),bar.x,bar.y+barH/2);
+            }
           });
         }
-        drawInside(meta0.data,prevQ);
-        drawInside(meta1.data,curQ);
+        drawInside(meta0.data,pcsPrev,prevQ);
+        drawInside(meta1.data,pcsCur,curQ);
 
-        // 標打數 diff label above bar pair
-        c.font='bold 9.5px sans-serif';
+        // 上方增減：PCS（與柱高一致），括號內附標打數的增減
         c.textBaseline='alphabetic';
         meta0.data.forEach(function(bar0,i){
           var bar1=meta1.data[i];
           if(!bar1)return;
-          var p=Math.round(prevQ[i]||0),cr=Math.round(curQ[i]||0);
-          if(!p&&!cr)return;
-          var diff=cr-p;
-          var abs=Math.abs(diff);
-          var fmt=abs>=1000000?(Math.round(abs/100000)/10)+'M':abs>=1000?Math.round(abs/1000)+'k':abs.toLocaleString();
-          var lbl=diff>0?('▲+'+fmt):diff<0?('▼-'+fmt):'－';
+          var p=Math.round(pcsPrev[i]||0), cr=Math.round(pcsCur[i]||0);
+          var pq=Math.round(prevQ[i]||0), cq=Math.round(curQ[i]||0);
+          if(!p&&!cr&&!pq&&!cq)return;
+          var diff=cr-p, dq=cq-pq;
+          var lbl=diff>0?('▲+'+fmtK(diff)):diff<0?('▼-'+fmtK(diff)):'－';
+          var x=(bar0.x+bar1.x)/2, y=Math.min(bar0.y,bar1.y)-5;
+          var sub=(dq!==0)?('標打 '+(dq>0?'+':'-')+fmtK(dq)):'';
+          if(sub){
+            c.font='8px sans-serif';
+            c.fillStyle='#94a3b8';
+            c.fillText(sub,x,y);
+            y-=9;
+          }
+          c.font='bold 9.5px sans-serif';
           c.fillStyle=diff>0?'#16a34a':diff<0?'#dc2626':'#94a3b8';
-          c.fillText(lbl,(bar0.x+bar1.x)/2,Math.min(bar0.y,bar1.y)-5);
+          c.fillText(lbl,x,y);
         });
         c.restore();
       }
