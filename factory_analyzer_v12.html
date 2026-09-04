@@ -300,7 +300,10 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
 
   <div id="main">
     <div class="top-bar">
-      <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具</span>
+      <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
+        <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-04</span>
+      </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
         <button class="btn" id="btn-export-pdf" onclick="exportAllTabsPDF()">📄 匯出各分頁 PDF</button>
@@ -5718,7 +5721,7 @@ async function loadFromServer(){
       var xlsxLinks = [];
       doc.querySelectorAll('a[href]').forEach(function(a){
         var href = a.getAttribute('href');
-        if(href && /\.(xlsx|xls|csv)$/i.test(href)){
+        if(href && /\.(xlsx|xls|csv|json|html?)$/i.test(href)){
           xlsxLinks.push({url: baseUrl + href, name: decodeURIComponent(href)});
         }
       });
@@ -5809,7 +5812,7 @@ function _doProcessAutoLoad(fileArr){
   //   Daily All FIFO_COLOR_SIZE*.csv/.xlsx -> CPO生產進度 (A=較舊/昨天, B=較新/今天)
 
   var cur=null, prev=null, completion=null, capfile=null, exportSched=null, worksheet=null;
-  var wipFiles=[], sewingFiles=[], hoursDist=null, tpSummary=null, cpoprogFiles=[], clrFiles=[];
+  var wipFiles=[], sewingFiles=[], hoursDist=null, tpSummary=null, cpoprogFiles=[], clrFiles=[], sketchFiles=[];
   var capfiles=[], worksheetFiles=[];
   window._seenCapKeys = {}; // reset per-call to avoid stale keys on reload
 
@@ -5826,7 +5829,12 @@ function _doProcessAutoLoad(fileArr){
   fileArr.forEach(function(f){
     var n = f.name;
     var nl = n.toLowerCase();
-    if(nl.indexOf('排單_本週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('本週') >= 0)){
+    if(/\.json$/i.test(n)){
+      // 圖稿 JSON（slim_for_upload.py 從排單檔抽出來的）。這個判斷一定要放在最前面：
+      // 檔名是「排單_本週_xxx_圖稿.json」，擺在排單分支後面會被排單先認走，
+      // curRaw 就會拿到一個 JSON 而變成空的。
+      if(/圖稿/.test(n)||/sketch/i.test(nl))sketchFiles.push(f);
+    } else if(nl.indexOf('排單_本週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('本週') >= 0)){
       if(!cur) cur = f; // first match = newest (files sorted newest-first)
     } else if(nl.indexOf('排單_上週') >= 0 || (nl.indexOf('排單') >= 0 && nl.indexOf('上週') >= 0)){
       if(!prev) prev = f;
@@ -5939,6 +5947,11 @@ function _doProcessAutoLoad(fileArr){
     markSkip('CPO生產進度報表');
   }
 
+  if(sketchFiles.length){
+    sketchFiles.forEach(function(f){ handleSketchJsonFile(f); });
+    markOk('圖稿 JSON：'+sketchFiles.map(function(f){return f.name;}).join('、'));
+  }
+
   // 進度控管：Daily All FIFO_COLOR_SIZE 明細檔。取最新兩個檔案（新=今天、舊=昨天）自動比對出昨日增量。
   if(clrFiles.length){
     clrLoadNewestTwo(clrFiles);
@@ -5968,7 +5981,7 @@ function _doProcessAutoLoad(fileArr){
   // This catches PP schedule files with non-standard naming (e.g. "GLD5-20260801.xlsx")
   var classifiedNames={};
   [cur,prev,completion,exportSched,worksheet,hoursDist,tpSummary].forEach(function(f){if(f)classifiedNames[f.name]=1;});
-  wipFiles.concat(sewingFiles).concat(capfiles).concat(worksheetFiles).concat(cpoprogFiles).concat(clrFiles).forEach(function(f){classifiedNames[f.name]=1;});
+  wipFiles.concat(sewingFiles).concat(capfiles).concat(worksheetFiles).concat(cpoprogFiles).concat(clrFiles).concat(sketchFiles).forEach(function(f){classifiedNames[f.name]=1;});
   var ppFallbackCount=0;
   fileArr.forEach(function(f){
     if(classifiedNames[f.name])return;
@@ -6308,6 +6321,32 @@ async function xlsxReadFiles(ab, wantedPaths){
     }
   }
   return result;
+}
+
+// 平板端用的圖稿來源：排單檔瘦身成 CSV 之後圖片就沒了，slim_for_upload.py 會另外
+// 把圖稿抽成 {款號小寫: data:image/...} 的 JSON 一起上傳，這裡直接讀進 sketchMap。
+function handleSketchJsonFile(file){
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      var obj=JSON.parse(ev.target.result);
+      if(!obj||typeof obj!=='object')return;
+      if(!sketchMap)sketchMap={};
+      var n=0;
+      Object.keys(obj).forEach(function(k){
+        if(typeof obj[k]==='string'&&obj[k].indexOf('data:image/')===0){
+          sketchMap[String(k).toLowerCase()]=obj[k]; n++;
+        }
+      });
+      var el=document.getElementById('sketch-status');
+      if(el){
+        el.textContent=n?'🎨 已載入 '+Object.keys(sketchMap).length+' 筆圖稿':'';
+        el.style.color='#16a34a';
+      }
+      if(n>0)onFilter();
+    }catch(err){ console.warn('[圖稿JSON]',err); }
+  };
+  reader.readAsText(file,'UTF-8');
 }
 
 async function extractSketchesFromFile(file){
