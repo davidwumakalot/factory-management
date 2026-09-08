@@ -86,6 +86,12 @@ td.mono{font-family:"SF Mono",Consolas,monospace;font-size:10px;text-align:left;
 .ie-bar{height:4px;background:#e2e8f0;border-radius:3px;overflow:hidden;width:28px;flex-shrink:0}
 .ie-fill{height:100%;background:#1e3a8a;border-radius:3px}
 .pill{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#e2e8f0;color:#475569;border:1px solid #cbd5e1}
+/* 特殊工法短標籤（Special 欄）：四類各給一個色，同一款有多種就並排 */
+.sp-tag{display:inline-block;padding:1px 5px;margin:1px 3px 1px 0;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.02em;white-space:nowrap;border:1px solid}
+.sp-wash{background:#e0f2fe;color:#0369a1;border-color:#bae6fd}
+.sp-print{background:#fef3c7;color:#b45309;border-color:#fde68a}
+.sp-pleating{background:#ede9fe;color:#6d28d9;border-color:#ddd6fe}
+.sp-emb{background:#dcfce7;color:#15803d;border-color:#bbf7d0}
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.02em}
 .tag.new{background:#dcfce7;color:#15803d;border:1px solid #86efac}
 .tag.removed{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}
@@ -302,7 +308,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-04</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-07</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -503,6 +509,12 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
               <option value="normal">不變/變動</option>
               <option value="new">新增</option>
               <option value="removed">移除</option>
+            </select>
+          </div>
+          <div class="filter-group"><label>結案款</label>
+            <select id="f-ended" onchange="onFilter()" title="最後一個有數量的出口月份早於本月＝已結束">
+              <option value="">全部顯示</option>
+              <option value="hide">隱藏本月前已結束</option>
             </select>
           </div>
           <div style="margin-left:auto;font-size:11px;color:#64748b;align-self:center" id="sketch-status"></div>
@@ -1188,6 +1200,27 @@ document.addEventListener('click',function(e){
   if(tip&&tip.style.display!=='none'&&!tip.contains(e.target)){closePoPanel();}
 });
 
+/* ===================== 特殊工法（SPECIAL_PRODUCTION）壓縮成短標籤 =====================
+   排單檔的 SPECIAL_PRODUCTION 是整串工法名稱（例如
+   「[特工] General Embroidery(Within 20000 Stitches) 一般繡花(2萬針以下); ATH ECO Butter Wash ATH 噴軟洗;」），
+   表格放不下也不好掃。這裡只認四類關鍵字，壓成 Wash / Print / Pleating / Emb。
+   規則刻意用字根（pleat、embroider）而不是完整字，才能同時吃到 Pleating／Pleated、
+   Embroidery／Embroidered。中文字根是備援，萬一哪天來源只給中文也認得出來。
+   注意：雷射切割、成衣染色、絎縫不在這四類裡，會顯示「—」。要加類別就在這個陣列加一列。 */
+var SP_RULES=[
+  {tag:'Wash',     re:/wash|水洗|噴軟|柔軟洗/i},
+  {tag:'Print',    re:/print|印花|膠印|發泡印|熱轉印/i},
+  {tag:'Pleating', re:/pleat|壓摺|壓百摺|打摺/i},
+  {tag:'Emb',      re:/embroider|繡/i}
+];
+function specialTags(text){
+  if(!text)return [];
+  var s=String(text);
+  var out=[];
+  SP_RULES.forEach(function(r){ if(r.re.test(s))out.push(r.tag); });
+  return out;   // 固定順序 Wash → Print → Pleating → Emb，不隨原文出現順序跑掉
+}
+
 /* ===================== Parses raw sheet rows ===================== */
 function parseSheetRows(rows){
   var map={};
@@ -1206,8 +1239,10 @@ function parseSheetRows(rows){
     if(!ym)ym=parseYM(r['EXP M']||'');
     if(ym&&isValidYM(ym))monthSet[ym]=1;
     var key=mk+'|||'+cust+'|||'+fstyle;
-    if(!map[key])map[key]={mk:mk,cust:cust,fstyle:fstyle,pi:pi,ie_sum:0,ie_cnt:0,total:0,monthly:{},monthlyQtyIE:{},subQtyIE:{},totalQtyIE:0,crfp2raw:null,poRows:[]};
+    if(!map[key])map[key]={mk:mk,cust:cust,fstyle:fstyle,pi:pi,ie_sum:0,ie_cnt:0,total:0,monthly:{},monthlyQtyIE:{},subQtyIE:{},totalQtyIE:0,crfp2raw:null,poRows:[],spSet:{}};
     var e=map[key];
+    // 同一款可能有多筆 PO、各自工法不同 → 取聯集
+    specialTags(r['SPECIAL_PRODUCTION']).forEach(function(t){e.spSet[t]=1;});
     if(ie>0){e.ie_sum+=ie;e.ie_cnt++;}
     e.total+=pcs;
     e.totalQtyIE+=qtyie;
@@ -1252,7 +1287,10 @@ function parseSheetRows(rows){
     }
   });
   var months=Object.keys(monthSet).filter(isValidYM).sort();
-  Object.values(map).forEach(function(d){d.ie=d.ie_cnt>0?d.ie_sum/d.ie_cnt:0;});
+  Object.values(map).forEach(function(d){
+    d.ie=d.ie_cnt>0?d.ie_sum/d.ie_cnt:0;
+    d.sp=SP_RULES.map(function(r){return r.tag;}).filter(function(t){return d.spSet[t];});
+  });
   return {map:map, months:months};
 }
 
@@ -2826,9 +2864,17 @@ function buildComparison(){
     var entry = c || p;
     var crfp2 = (c&&c.crfp2) ? c.crfp2 : (p&&p.crfp2 ? p.crfp2 : '');
     var ie = c ? c.ie : (p ? p.ie : 0);
+    // 移除的款本週已經沒有資料，工法要沿用上週那份
+    var sp = (c && c.sp && c.sp.length) ? c.sp : ((p && p.sp) || []);
+    // 最後一個有數量的出口月份。用來判斷「這款是不是已經結束了」——
+    // allMonths 是排序過的，所以最後一次命中就是最晚的那個月。
+    // 完全沒有數量的款會留空字串，這種判斷不出來，一律不隱藏。
+    var lastMonth='';
+    allMonths.forEach(function(m){ if((monthly[m]||0)>0)lastMonth=m; });
     out.push({
       _id: idx++,
       mk: entry.mk, cust: entry.cust, fstyle: entry.fstyle, pi: entry.pi,
+      sp: sp, spStr: sp.join(' '), lastMonth: lastMonth,
       crfp2: crfp2, ie: ie,
       monthly: monthly, delta: delta, monthlyQtyIE: monthlyQtyIE, deltaQtyIE: deltaQtyIE,
       total: total, curTotal: curTotal, prevTotal: prevTotal, totalDelta: totalDelta,
@@ -2891,6 +2937,13 @@ function setAllMonths(val){
 function getActiveMths(){return allMonths.filter(function(m){return activeMonths[m];});}
 
 /* ===================== Filtering ===================== */
+/* 本月，格式 YYYY-MM。lastMonth 也是這個格式，所以直接字串比大小就可以。 */
+function currentYM(){
+  var n=new Date();
+  return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');
+}
+var endedHiddenCount=0;   // 這次篩選被「已結束」規則擋掉幾筆，顯示在筆數旁邊
+
 function filtered(){
   var mk=document.getElementById('f-mk').value;
   var cust=document.getElementById('f-cust').value;
@@ -2898,8 +2951,14 @@ function filtered(){
   var style=document.getElementById('f-style').value.toLowerCase();
   var minpcs=parseFloat(document.getElementById('f-min').value)||0;
   var status=document.getElementById('f-status').value;
+  var endedEl=document.getElementById('f-ended');
+  var hideEnded=endedEl?endedEl.value==='hide':false;
+  var thisYM=currentYM();
+  endedHiddenCount=0;
   return compData.filter(function(d){
     if(excludedIds[d._id])return false;
+    // 「已結束」＝最後一個有數量的出口月份早於本月。判斷不出來的（完全沒數量）不隱藏。
+    if(hideEnded && d.lastMonth && d.lastMonth < thisYM){ endedHiddenCount++; return false; }
     if(mk&&d.mk!==mk)return false;
     if(cust&&d.cust!==cust)return false;
     if(pi&&d.pi!==pi)return false;
@@ -3003,12 +3062,12 @@ function restoreAll(){excludedIds={};onFilter();}
 
 /* ===================== Detail table render ===================== */
 function buildTableHeader(activeMths){
-  var cols=[{k:'mk',l:'MK',c:'left'},{k:'cust',l:'Cust',c:'left'},{k:'fstyle',l:'F_Style',c:'left'},{k:'pi',l:'Product Item',c:'left'},{k:'crfp2',l:'CRFP2',c:'left'},{k:'ie',l:'IE',c:''}];
+  var cols=[{k:'mk',l:'MK',c:'left'},{k:'cust',l:'Cust',c:'left'},{k:'fstyle',l:'F_Style',c:'left'},{k:'pi',l:'Product Item',c:'left'},{k:'sp',l:'Special',c:'left'},{k:'crfp2',l:'CRFP2',c:'left'},{k:'ie',l:'IE',c:''}];
   activeMths.forEach(function(m){cols.push({k:'m_'+m,l:m.replace(/^\d{4}-/,''),c:''}); });
   cols.push({k:'total',l:'本週 Total',c:''});
 
   // Fixed pixel widths for non-month columns
-  var fixedW={mk:44,cust:50,fstyle:130,pi:100,crfp2:76,ie:62,total:72};
+  var fixedW={mk:44,cust:50,fstyle:130,pi:100,sp:104,crfp2:76,ie:62,total:72};
   var chkW=30, poW=40;
   var fixedTotal=chkW+poW+Object.values(fixedW).reduce(function(s,v){return s+v;},0);
   // month columns share remaining width equally (min 58px each)
@@ -3039,6 +3098,9 @@ function render(data,activeMths){
     } else if(sortCol.indexOf('m_')===0){
       av=a.monthly[sortCol.slice(2)]||0;
       bv=b.monthly[sortCol.slice(2)]||0;
+    } else if(sortCol==='sp'){
+      // sp 是陣列，直接相減會變 NaN，改用組好的字串排序（沒工法的排最後）
+      av=a.spStr||'￿'; bv=b.spStr||'￿';
     } else {
       av=a[sortCol]||0; bv=b[sortCol]||0;
     }
@@ -3049,7 +3111,7 @@ function render(data,activeMths){
   var grouped={};
   data.forEach(function(d){if(!grouped[d.mk])grouped[d.mk]={};if(!grouped[d.mk][d.cust])grouped[d.mk][d.cust]=[];grouped[d.mk][d.cust].push(d);});
   var rows='',count=0;
-  var span=8+activeMths.length+1; // +1 for PO button col
+  var span=9+activeMths.length+1; // 固定欄 9 個（含 Special）+ 月份 + PO 按鈕欄
   Object.keys(grouped).sort().forEach(function(mk){
     rows+='<tr class="grp"><td colspan="'+span+'">▸ '+mk+'</td></tr>';
     Object.keys(grouped[mk]).sort().forEach(function(cust){
@@ -3084,6 +3146,9 @@ function render(data,activeMths){
           '<td class="left">'+d.mk+'</td><td class="left">'+d.cust+'</td>'+
           '<td class="mono">'+d.fstyle+statusTag+'</td>'+
           '<td class="left"><span class="pill">'+(d.pi||'—')+'</span></td>'+
+          '<td class="left">'+(d.sp&&d.sp.length
+              ? d.sp.map(function(t){return '<span class="sp-tag sp-'+t.toLowerCase()+'">'+t+'</span>';}).join('')
+              : '<span style="color:#cbd5e1">—</span>')+'</td>'+
           '<td class="mono">'+(d.crfp2||'—')+'</td>'+
           '<td><div class="ie-wrap"><span class="ie-num">'+d.ie.toFixed(2)+'</span><span class="ie-bar"><span class="ie-fill" style="width:'+pct+'%"></span></span></div></td>'+
           mCells+'<td style="font-weight:700">'+rowTotal.toLocaleString()+'</td>'+
@@ -3094,7 +3159,7 @@ function render(data,activeMths){
       var cMo=activeMths.map(function(m){return ct.reduce(function(s,d){return s+(d.monthly[m]||0);},0);});
       var cIE=ct.reduce(function(s,d){return s+d.ie;},0)/ct.length;
       var cTotal=ct.reduce(function(s,d){return s+(d.status==='removed'?d.prevTotal:d.curTotal);},0);
-      rows+='<tr class="sub"><td></td><td></td><td class="left" style="font-size:11px;color:#475569;padding-left:24px">'+cust+' 小計</td><td></td><td></td><td></td>'+
+      rows+='<tr class="sub"><td></td><td></td><td class="left" style="font-size:11px;color:#475569;padding-left:24px">'+cust+' 小計</td><td></td><td></td><td></td><td></td>'+
         '<td><div class="ie-wrap"><span class="ie-num">'+cIE.toFixed(2)+'</span></div></td>'+
         cMo.map(function(v){return '<td>'+(v?v.toLocaleString():'—')+'</td>';}).join('')+
         '<td>'+cTotal.toLocaleString()+'</td><td class="po-btn-col"></td></tr>';
@@ -3102,7 +3167,8 @@ function render(data,activeMths){
   });
   if(!rows)rows='<tr><td colspan="'+span+'" style="text-align:center;padding:3rem;color:#64748b">無符合資料</td></tr>';
   document.getElementById('tbody').innerHTML=rows;
-  document.getElementById('row-count').textContent='共 '+count+' 筆款式';
+  document.getElementById('row-count').textContent='共 '+count+' 筆款式'
+    +(endedHiddenCount?'（已隱藏 '+endedHiddenCount+' 筆本月前結束）':'');
 }
 
 /* ===================== Overview: MK multi-select dropdown ===================== */
@@ -6071,6 +6137,7 @@ function exportHtmlSnapshot(){
       '<tr><td>篩選 - 款式</td><td>'+filterStyle+'</td></tr>'+
       '<tr><td>篩選 - 最小PCS</td><td>'+filterMin+'</td></tr>'+
       '<tr><td>篩選 - 狀態</td><td>'+filterStatus+'</td></tr>'+
+      '<tr><td>篩選 - 結案款</td><td>'+((document.getElementById('f-ended')||{}).value==='hide'?'已隱藏本月前結束':'全部顯示')+'</td></tr>'+
       '<tr><td>排除款數</td><td>'+excludedList.length+'</td></tr>'+
       (excludedList.length?'<tr><td>排除款式</td><td>'+excludedList.join('<br>')+'</td></tr>':'')+
       '</tbody></table>';
@@ -6499,12 +6566,12 @@ document.addEventListener('click',function(e){
 });
 
 /* ===================== Export helpers ===================== */
-function makeHeader(mths){return ['狀態','MK','Cust','F_Style','PRODUCT_ITEM','CRFP2','IE'].concat(mths).concat(['本週Total','上週Total','差異']);}
+function makeHeader(mths){return ['狀態','MK','Cust','F_Style','PRODUCT_ITEM','SPECIAL','CRFP2','IE'].concat(mths).concat(['本週Total','上週Total','差異']);}
 function statusLabel(s){return s==='new'?'新增':(s==='removed'?'移除':'');}
 
 function dataToRows(data,mths){
   return [makeHeader(mths)].concat(data.map(function(d){
-    return [statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.crfp2||'',+d.ie.toFixed(2)]
+    return [statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.spStr||'',d.crfp2||'',+d.ie.toFixed(2)]
       .concat(mths.map(function(m){return d.monthly[m]||0;}))
       .concat([d.curTotal,d.prevTotal,d.totalDelta]);
   }));
@@ -6518,14 +6585,14 @@ function buildSummaryRows(data,mths){
   Object.keys(grouped).sort().forEach(function(mk){
     Object.keys(grouped[mk]).sort().forEach(function(cust){
       grouped[mk][cust].forEach(function(d){
-        rows.push([statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.crfp2||'',+d.ie.toFixed(2)]
+        rows.push([statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.spStr||'',d.crfp2||'',+d.ie.toFixed(2)]
           .concat(mths.map(function(m){return d.monthly[m]||0;}))
           .concat([d.curTotal,d.prevTotal,d.totalDelta]));
       });
       var ct=grouped[mk][cust];
       var cCur=ct.reduce(function(s,d){return s+d.curTotal;},0);
       var cPrev=ct.reduce(function(s,d){return s+d.prevTotal;},0);
-      rows.push(['','',cust+' 小計','','','',(ct.reduce(function(s,d){return s+d.ie;},0)/ct.length).toFixed(2)]
+      rows.push(['','',cust+' 小計','','','','',(ct.reduce(function(s,d){return s+d.ie;},0)/ct.length).toFixed(2)]
         .concat(mths.map(function(m){return ct.reduce(function(s,d){return s+(d.monthly[m]||0);},0);}))
         .concat([cCur,cPrev,cCur-cPrev]));
       subtotalRows.add(rows.length-1);
@@ -6533,14 +6600,14 @@ function buildSummaryRows(data,mths){
     var am=[].concat.apply([],Object.values(grouped[mk]));
     var mCur=am.reduce(function(s,d){return s+d.curTotal;},0);
     var mPrev=am.reduce(function(s,d){return s+d.prevTotal;},0);
-    rows.push(['',mk+' 合計','','','','',(am.reduce(function(s,d){return s+d.ie;},0)/am.length).toFixed(2)]
+    rows.push(['',mk+' 合計','','','','','',(am.reduce(function(s,d){return s+d.ie;},0)/am.length).toFixed(2)]
       .concat(mths.map(function(m){return am.reduce(function(s,d){return s+(d.monthly[m]||0);},0);}))
       .concat([mCur,mPrev,mCur-mPrev]));
     totalRows.add(rows.length-1);
   });
   var gCur=data.reduce(function(s,d){return s+d.curTotal;},0);
   var gPrev=data.reduce(function(s,d){return s+d.prevTotal;},0);
-  rows.push(['GRAND TOTAL','','','','','',''].concat(mths.map(function(m){return data.reduce(function(s,d){return s+(d.monthly[m]||0);},0);})).concat([gCur,gPrev,gCur-gPrev]));
+  rows.push(['GRAND TOTAL','','','','','','',''].concat(mths.map(function(m){return data.reduce(function(s,d){return s+(d.monthly[m]||0);},0);})).concat([gCur,gPrev,gCur-gPrev]));
   totalRows.add(rows.length-1);
   return {rows:rows, subtotalRows:subtotalRows, totalRows:totalRows};
 }
