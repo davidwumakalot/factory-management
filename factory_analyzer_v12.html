@@ -308,7 +308,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-07</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-08</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -787,11 +787,12 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
         </div>
 
         <div class="chart-card" style="margin-bottom:12px">
-          <div class="chart-title">各客戶 → 各款 → 各出口期 → 各顏色／PO　（點一下列可展開下一層；綠色 +N ＝ 與前一份檔案相比昨日增加的件數，欄位標頭顯示的是目前篩選範圍的增量合計）</div>
+          <div class="chart-title" id="clr-tree-title">各客戶 → 各款 → 各出口期 → 各顏色／PO　（點一下列可展開下一層；綠色 +N ＝ 與前一份檔案相比昨日增加的件數，欄位標頭顯示的是目前篩選範圍的增量合計）</div>
           <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
             <button class="btn" onclick="clrExpandAll(true)">▼ 展開全部</button>
             <button class="btn" onclick="clrExpandAll(false)">▶ 收合全部</button>
             <button class="btn" id="clr-btn-hidezero" onclick="clrToggleHideZero()" title="把 CUTTING 還是 0 的款（還沒開裁＝還沒進生產）整款隱藏">🚫 隱藏未生產的款</button>
+            <button class="btn" id="clr-btn-l2mode" onclick="clrToggleL2Mode()" title="切換第二／第三層的順序">🔀 款式 / 出口日 / 顏色</button>
             <span id="clr-rowcount" style="font-size:11px;color:#64748b"></span>
           </div>
           <div class="clr-tablewrap" id="clr-rows"></div>
@@ -4952,6 +4953,10 @@ function clrSnaps(){
 var clrExpanded={};                      // {nodeKey:true} — 款號／出口日的展開狀態（跨重繪保留）
 var clrGroupClosed={};                   // {groupKey:true} — 客戶／工廠分組預設展開，這裡記的是「被收起來的」
 var clrHideZeroCut=false;                // true = 隱藏整款 CUTTING 為 0（還沒開裁）的款
+// 第二層要用「出口日」還是「顏色」。第三層自動變成另一個。
+// 'exp'   = 款號 → 出口日 → 顏色（預設，看某個船期要出哪些顏色）
+// 'color' = 款號 → 顏色  → 出口日（看某個顏色分散在哪幾個船期）
+var clrL2Mode='exp';
 var _clrNodeKeys=[];                     // 每次重繪重建：index -> nodeKey（避免把含引號的字串塞進 onclick）
 var _clrRenderTimer=null;
 var _clrCache=null;                      // 上次 clrBuild() 結果，供下載用
@@ -5267,10 +5272,16 @@ function clrBuild(){
     // 所以「色數」必須算相異顏色，不能算明細筆數（那會變成 顏色×PO×出口日 的總筆數）。
     if(!S)S=styles[sk]={key:sk,mk:r.mk,cust:r.cust,style:r.style,qty:0,cut:0,rcv:0,pack:0,
                         d:{qty:0,cut:0,rcv:0,pack:0},exps:{},colorSet:{},pos:{},nLeaf:0,minExp:'￿'};
-    var ek=sk+'||'+r.exp;
-    var E=S.exps[r.exp];
-    if(!E)E=S.exps[r.exp]={key:ek,exp:r.exp,expDisp:r.expDisp,grp:r.grp,qty:0,cut:0,rcv:0,pack:0,
-                           d:{qty:0,cut:0,rcv:0,pack:0},colors:[],colorSet:{},pos:{}};
+    // 中間層的分組鍵：看 clrL2Mode 決定要用出口日還是顏色。
+    // key 帶上模式字串，兩種模式的展開狀態才不會互相污染。
+    var byExp=(clrL2Mode!=='color');
+    var mid=byExp?r.exp:r.color;
+    var midDisp=byExp?r.expDisp:r.color;
+    var ek=sk+'||'+clrL2Mode+'||'+mid;
+    var E=S.exps[mid];
+    if(!E)E=S.exps[mid]={key:ek,exp:r.exp,expDisp:r.expDisp,grp:r.grp,mid:mid,midDisp:midDisp,
+                           qty:0,cut:0,rcv:0,pack:0,
+                           d:{qty:0,cut:0,rcv:0,pack:0},colors:[],colorSet:{},expSet:{},pos:{}};
     var row={mk:r.mk,cust:r.cust,style:r.style,exp:r.exp,expDisp:r.expDisp,grp:r.grp,po:r.po,color:r.color,
              ie:r.ie,qty:r.qty,cut:r.cut,sew:r.sew,rcv:r.rcv,pack:r.pack,d:d,changed:changed,isNew:isNewKey};
     E.colors.push(row);
@@ -5283,6 +5294,7 @@ function clrBuild(){
       X.d.qty+=d.qty; X.d.cut+=d.cut; X.d.rcv+=d.rcv; X.d.pack+=d.pack;
       X.pos[r.po]=1;
       X.colorSet[r.color]=1;
+      if(X.expSet)X.expSet[r.exp]=1;
     });
     S.nLeaf++;
     if(r.exp&&r.exp<S.minExp)S.minExp=r.exp;
@@ -5347,11 +5359,20 @@ function clrBuild(){
       var E=S.exps[e];
       E.nPo=Object.keys(E.pos).length;
       E.nColor=Object.keys(E.colorSet).length;
-      E.colors.sort(function(a,b){
-        var da=Math.abs(a.d.pack)+Math.abs(a.d.cut), db=Math.abs(b.d.pack)+Math.abs(b.d.cut);
-        if(db!==da)return db-da;
-        return b.qty-a.qty;
-      });
+      E.nExp=Object.keys(E.expSet||{}).length;
+      if(clrL2Mode==='color'){
+        // 顏色模式：葉節點是出口日，照日期排比照異動量排好讀
+        E.colors.sort(function(a,b){
+          if(a.exp!==b.exp)return a.exp<b.exp?-1:1;
+          return b.qty-a.qty;
+        });
+      } else {
+        E.colors.sort(function(a,b){
+          var da=Math.abs(a.d.pack)+Math.abs(a.d.cut), db=Math.abs(b.d.pack)+Math.abs(b.d.cut);
+          if(db!==da)return db-da;
+          return b.qty-a.qty;
+        });
+      }
       return E;
     });
     if(S.minExp==='￿')S.minExp='';
@@ -5434,6 +5455,13 @@ function clrToggleHideZero(){
   clrHideZeroCut=!clrHideZeroCut;
   renderClrTab();
 }
+function clrToggleL2Mode(){
+  clrL2Mode=(clrL2Mode==='color')?'exp':'color';
+  // 兩種模式的中間層節點鍵不同，切換後舊的展開狀態沒有意義，直接清掉重來
+  clrExpanded={};
+  _clrCache=null;
+  renderClrTab();
+}
 function clrToggleGroup(idx){
   var k=_clrNodeKeys[idx];
   if(!k)return;
@@ -5483,6 +5511,19 @@ function renderClrTab(){
     hzBtn.className='btn'+(clrHideZeroCut?' primary':'');
     hzBtn.textContent=clrHideZeroCut?'✅ 已隱藏未生產的款':'🚫 隱藏未生產的款';
   }
+  var byExp=(clrL2Mode!=='color');
+  var ttl=document.getElementById('clr-tree-title');
+  if(ttl){
+    var head=byExp?'各客戶 → 各款 → 各出口期 → 各顏色／PO':'各客戶 → 各款 → 各顏色 → 各出口日／PO';
+    ttl.innerHTML=head+'　（點一下列可展開下一層；綠色 +N ＝ 與前一份檔案相比昨日增加的件數，欄位標頭顯示的是目前篩選範圍的增量合計）';
+  }
+  var l2Btn=document.getElementById('clr-btn-l2mode');
+  if(l2Btn){
+    l2Btn.className='btn'+(byExp?'':' primary');
+    l2Btn.textContent=byExp?'🔀 款式 / 出口日 / 顏色':'🔀 款式 / 顏色 / 出口日';
+    l2Btn.title=byExp?'目前：出口日在上、顏色在下。點一下改成顏色在上'
+                     :'目前：顏色在上、出口日在下。點一下改回出口日在上';
+  }
 
   /* --- KPI --- */
   var t=b.tot;
@@ -5512,7 +5553,8 @@ function renderClrTab(){
     return '<span class="clr-th-delta'+cls+'">昨日 '+(d>0?'+':'')+clrFmt(d)+'</span>';
   }
   var h='<table>'+CLR_COLGROUP+'<thead><tr>'+
-    '<th class="left">'+(groupBy==='none'?'款號 / 出口日 / 顏色':(groupBy==='mk'?'工廠 / 款號 / 出口日 / 顏色':'客戶 / 款號 / 出口日 / 顏色'))+'</th>'+
+    '<th class="left">'+(function(){var lv=byExp?'款號 / 出口日 / 顏色':'款號 / 顏色 / 出口日';
+      return groupBy==='none'?lv:(groupBy==='mk'?'工廠 / '+lv:'客戶 / '+lv);})()+'</th>'+
     '<th class="left">MK</th><th class="left">客戶</th><th class="left">PO</th>'+
     '<th>訂單量'+thDelta(t.dqty)+'</th>'+
     '<th>CUTTING'+thDelta(t.dcut)+'</th>'+
@@ -5578,7 +5620,9 @@ function renderClrTab(){
       '<td class="left" title="'+escHtml(S.style)+'"><span class="clr-caret">'+(open?'▼':'▶')+'</span> '+escHtml(S.style)+
         (donePct>=99.95?'<span class="clr-tag done">已完成</span>':'')+'</td>'+
       '<td class="left">'+escHtml(S.mk)+'</td><td class="left">'+escHtml(S.cust)+'</td>'+
-      '<td class="left">'+S.expList.length+' 出口期・'+S.nColor+' 色・'+S.nPo+' PO</td>'+
+      '<td class="left">'+(byExp
+        ? S.expList.length+' 出口期・'+S.nColor+' 色・'+S.nPo+' PO'
+        : S.nColor+' 色・'+S.expList.length+' 出口期・'+S.nPo+' PO')+'</td>'+
       clrQtyCell(S.qty,S.d.qty,showD)+
       clrBarCell(S.cut,S.qty,'cut',S.d.cut,showD)+
       clrBarCell(S.rcv,S.qty,'rcv',S.d.rcv,showD)+
@@ -5590,9 +5634,10 @@ function renderClrTab(){
       var ei=_clrNodeKeys.push(E.key)-1;
       var eopen=!!clrExpanded[E.key];
       h+='<tr class="clr-l2" onclick="clrToggle('+ei+')">'+
-        '<td class="left" style="padding-left:22px"><span class="clr-caret">'+(eopen?'▼':'▶')+'</span> 出口日 '+escHtml(E.expDisp)+'</td>'+
+        '<td class="left" style="padding-left:22px"><span class="clr-caret">'+(eopen?'▼':'▶')+'</span> '+(byExp?'出口日 ':'')+escHtml(E.midDisp)+'</td>'+
         '<td class="left"></td><td class="left"></td>'+
-        '<td class="left">'+E.nColor+' 色・'+E.nPo+' PO</td>'+
+        '<td class="left">'+(byExp?E.nColor+' 色・'+E.nPo+' PO'
+                                  :E.nExp+' 出口期・'+E.nPo+' PO')+'</td>'+
         clrQtyCell(E.qty,E.d.qty,showD)+
         clrBarCell(E.cut,E.qty,'cut',E.d.cut,showD)+
         clrBarCell(E.rcv,E.qty,'rcv',E.d.rcv,showD)+
@@ -5601,7 +5646,8 @@ function renderClrTab(){
       if(!eopen)return;
       E.colors.forEach(function(c){
         h+='<tr class="clr-l3">'+
-          '<td class="left" style="padding-left:44px" title="'+escHtml(c.color)+'">'+escHtml(c.color)+
+          '<td class="left" style="padding-left:44px" title="'+escHtml(byExp?c.color:c.expDisp)+'">'+
+            escHtml(byExp?c.color:('出口日 '+c.expDisp))+
             (c.isNew?'<span class="clr-tag new">新增</span>':'')+'</td>'+
           '<td class="left">'+escHtml(c.mk)+'</td><td class="left">'+escHtml(c.cust)+'</td>'+
           '<td class="left" title="'+escHtml(c.po)+'">'+escHtml(c.po)+'</td>'+
