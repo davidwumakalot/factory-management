@@ -92,6 +92,10 @@ td.mono{font-family:"SF Mono",Consolas,monospace;font-size:10px;text-align:left;
 .sp-print{background:#fef3c7;color:#b45309;border-color:#fde68a}
 .sp-pleating{background:#ede9fe;color:#6d28d9;border-color:#ddd6fe}
 .sp-emb{background:#dcfce7;color:#15803d;border-color:#bbf7d0}
+/* 進度控管款號旁的詳情鈕 */
+.clr-info-btn{margin-left:6px;padding:0 5px;height:17px;line-height:15px;font-size:10px;cursor:pointer;
+  border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;vertical-align:middle}
+.clr-info-btn:hover{border-color:#1e3a8a;background:#eff6ff}
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.02em}
 .tag.new{background:#dcfce7;color:#15803d;border:1px solid #86efac}
 .tag.removed{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}
@@ -308,7 +312,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-08</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-08b</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -857,19 +861,23 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     </div>
 
 
+    <!-- 款式詳情浮動視窗。
+         這一塊原本放在 #tab-schedule 裡面，但那個容器在別的分頁時是 display:none，
+         子元素跟著不顯示，所以「進度控管」按了按鈕會沒反應。
+         搬到分頁容器外面（本來就是 position:fixed），兩個分頁就都叫得動。 -->
+    <!-- Style detail modal -->
+    <div id="sched-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9995;align-items:center;justify-content:center;opacity:0;transition:opacity .15s">
+      <div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);width:680px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column">
+        <div style="background:#1e3a8a;color:#fff;border-radius:11px 11px 0 0;padding:10px 16px;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;font-weight:700" id="sched-modal-title"></span>
+          <button onclick="closeSchedModal()" style="background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:5px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center">✕</button>
+        </div>
+        <div id="sched-modal-body" style="padding:16px;overflow-y:auto;flex:1"></div>
+      </div>
+    </div>
+
     <!-- Production schedule tab -->
     <div id="tab-schedule" style="display:none">
-      <!-- Style detail modal -->
-      <div id="sched-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9995;align-items:center;justify-content:center;opacity:0;transition:opacity .15s">
-        <div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);width:680px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column">
-          <div style="background:#1e3a8a;color:#fff;border-radius:11px 11px 0 0;padding:10px 16px;display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:13px;font-weight:700" id="sched-modal-title"></span>
-            <button onclick="closeSchedModal()" style="background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:5px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center">✕</button>
-          </div>
-          <div id="sched-modal-body" style="padding:16px;overflow-y:auto;flex:1"></div>
-        </div>
-      </div>
-
       <div class="chart-card" style="margin-bottom:14px">
         <div class="chart-title">生產排線（換款時間）</div>
         <div class="cap-upload-bar" style="margin-bottom:8px">
@@ -1032,6 +1040,11 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
+/* ===================== SOP 規範：廠別配置（不寫死廠代碼）===================== */
+const FACTORY_PREFIX = 'GLD';  // 廠別前綴（例：GLD1, GLD2...）
+// 如果需要支援多個集團或非 GLD 廠別，可改成從 URL 參數或配置檔讀取：
+// const FACTORY_PREFIX = new URLSearchParams(location.search).get('prefix') || 'GLD';
+
 /* ===================== State ===================== */
 var curRaw=null, prevRaw=null;     // parsed per-key maps from each file: {key: entry}
 var curFileName='', prevFileName='';
@@ -1785,7 +1798,7 @@ function parseHolidaysTableSheet(wb){
 // Helper: detect factory name from filename (e.g. "GLD6 0625.xlsx" → "GLD6")
 function detectFactoryFromFilename(fname){
   var m=fname.match(/GLD(\d)/i);
-  if(m)return 'GLD'+m[1];
+  if(m)return FACTORY_PREFIX+m[1];
   m=fname.match(/^([A-Z]+\d+)[\s_]/i);
   if(m)return m[1].toUpperCase();
   return 'GLD6';
@@ -1865,7 +1878,7 @@ function handleCapacityFile(file){
         if(m) return m[1];
         // Strategy 2: filename contains GLD+digit (e.g. 產能參數檔案_GLD6_...)
         m = fname.match(/GLD(\d)/i);
-        if(m) return 'GLD'+m[1];
+        if(m) return FACTORY_PREFIX+m[1];
         // Strategy 3: filename contains IND-GLD or INDGLD
         m = fname.match(/IND[-_]?(GLD\d?)/i);
         if(m) return m[1].toUpperCase();
@@ -2288,7 +2301,7 @@ function setupCpoProgUpload(){
 // get their own tab rather than silently colliding under a shared blank key.
 function cpoProgFactoryKey(fileName){
   var m=fileName.match(/GLD\s*-?\s*(\d+)/i);
-  if(m)return 'GLD'+m[1];
+  if(m)return FACTORY_PREFIX+m[1];
   return fileName.replace(/\.[^.]+$/,'');
 }
 
@@ -5455,6 +5468,14 @@ function clrToggleHideZero(){
   clrHideZeroCut=!clrHideZeroCut;
   renderClrTab();
 }
+/* 從「進度控管」開「生產排線」那個款式詳情浮動視窗。
+   openSchedModal() 的「排線時程」是看 schedFactory 決定要讀哪個廠的 B01／Worksheet，
+   所以先把 schedFactory 切到這一款所屬的廠（那個廠有資料才切），否則會顯示到別廠的排線。 */
+function clrOpenStyleModal(ev, mk, styleName){
+  if(ev){ev.stopPropagation();}          // 不要順便把該款的展開狀態切掉
+  if(mk && (b01DataMap[mk] || worksheetDataMap[mk])) schedFactory = mk;
+  openSchedModal(styleName);
+}
 function clrToggleL2Mode(){
   clrL2Mode=(clrL2Mode==='color')?'exp':'color';
   // 兩種模式的中間層節點鍵不同，切換後舊的展開狀態沒有意義，直接清掉重來
@@ -5618,6 +5639,8 @@ function renderClrTab(){
     var donePct=S.qty>0?S.pack/S.qty*100:0;
     h+='<tr class="clr-l1" onclick="clrToggle('+si+')">'+
       '<td class="left" title="'+escHtml(S.style)+'"><span class="clr-caret">'+(open?'▼':'▶')+'</span> '+escHtml(S.style)+
+        '<button class="clr-info-btn" title="看款式詳情（圖稿／數量／排線時程）" '+
+          'onclick="clrOpenStyleModal(event,\''+escJsStr(S.mk)+'\',\''+escJsStr(S.style)+'\')">🔍</button>'+
         (donePct>=99.95?'<span class="clr-tag done">已完成</span>':'')+'</td>'+
       '<td class="left">'+escHtml(S.mk)+'</td><td class="left">'+escHtml(S.cust)+'</td>'+
       '<td class="left">'+(byExp
@@ -6822,7 +6845,7 @@ function handlePPScheduleFile(file){
         var m=fname.match(/^([A-Za-z0-9]+)[\s_\-]/);
         if(m)return m[1];
         m=fname.match(/GLD(\d)/i);
-        if(m)return 'GLD'+m[1];
+        if(m)return FACTORY_PREFIX+m[1];
         return fname.replace(/\.[^.]+$/,'');
       })(file.name);
       parsePPPlanSheet(wb,mk);
@@ -6913,7 +6936,7 @@ function handleEffTrendFile(file){
     var factory='';
     var fnUp=file.name.toUpperCase();
     var _fm=fnUp.match(/GLD(\d)/);
-    if(_fm)factory='GLD'+_fm[1];
+    if(_fm)factory=FACTORY_PREFIX+_fm[1];
 
     // Date from row[0][1]
     var dateRaw=aoa[0]&&aoa[0][1];
