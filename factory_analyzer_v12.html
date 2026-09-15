@@ -312,7 +312,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-15</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-15b</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -972,6 +972,8 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
           <div id="eff-factory-bar" style="display:none;gap:6px"></div>
           <div id="eff-factory-summary" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
         </div>
+        <!-- 三旬排線目標效率（來自 PP Schedule 的 B04_Capacity_Three_of_Month），給上面的實際值做參照 -->
+        <div id="eff-tenday-bar" style="display:none;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;justify-content:flex-end"></div>
         <!-- Cards grid -->
         <div id="eff-trend-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px"></div>
       </div>
@@ -1080,6 +1082,7 @@ var capMkSelected='';
 var b01DataMap={};        // {GLD6: {lines:[...],styleToLines:{...}}, GLD5: ...}
 var worksheetDataMap={};  // {GLD6: {styles:{...}}, GLD5: {styles:{...}}}
 var ppPlanDataMap={};     // {GLD6: {'line|style': [{qty,sewFinMs}]}, GLD5: ...}
+var ppTenDayMap={};       // {GLD6: {refYmd:'2026-09-14', months:[{ym,label,ten:[{name,eff,days}]}]}} — B04_Capacity_Three_of_Month
 var effTrendDays=[];      // [{date:'2026/07/01',label:'7/1',factory:'GLD5',lines:{'5-01':{...}}}]
 var effTrendFactory='';   // currently selected factory in 效率趨勢
 var b02DataMap={};        // {GLD6: {'line|style': dailyTarget}, GLD5: ...}
@@ -1614,6 +1617,71 @@ function setupCapacityFileUpload(){
 //   e.g. MAX233402_Q127 on line 5-16 appears in slot2 (FIN 10/9) AND slot4 (FIN 11/28).
 //   Summing ALL unfinished would give 167,652; filtering sewFin ≤ 10/9 gives ~86,391 for slot2,
 //   and only rows in (10/9, 11/28] for slot4's incremental count.
+/* 解析 B04_Capacity_Three_of_Month —— 每月三旬的「排線目標效率」。
+   版面：row0 = '9月 上旬'…（月＋旬合併標籤），col1 = 指標名稱，往右是各旬的值。
+   年份表格裡沒寫，從 B04_Capacity 的 'IND-GLD6-2026091401' 這種戳記取；
+   月份數字變小就代表跨年（9,10,11,12,1,2 → 2026,2026,2026,2026,2027,2027）。
+   旬的界定是 1–10 / 11–20 / 21–月底：表上 9 月三旬工作天 8+6+8=22，
+   與 B04_Capacity 的 9 月 22 天一致，可以佐證。 */
+function parsePPTenDaySheet(wb, mk){
+  var sh=wb.Sheets['B04_Capacity_Three_of_Month'];
+  if(!sh)return;
+  var aoa=XLSX.utils.sheet_to_json(sh,{header:1,defval:null,raw:true});
+  if(!aoa.length)return;
+
+  // 參考日期（決定年份與「本月」）
+  var refY=null,refM=null,refYmd='';
+  var capSh=wb.Sheets['B04_Capacity'];
+  if(capSh){
+    var capA=XLSX.utils.sheet_to_json(capSh,{header:1,defval:null,raw:true});
+    for(var i=0;i<Math.min(3,capA.length);i++){
+      (capA[i]||[]).forEach(function(c){
+        if(refY||c==null)return;
+        var m=String(c).match(/(20\d{2})(\d{2})(\d{2})/);
+        if(m){refY=+m[1];refM=+m[2];refYmd=m[1]+'-'+m[2]+'-'+m[3];}
+      });
+    }
+  }
+  if(!refY){var n=new Date();refY=n.getFullYear();refM=n.getMonth()+1;}
+
+  // 找指標列。標籤在第幾欄不能寫死：SheetJS 會把開頭的空白欄吃掉，
+  // 同一份檔案用 python 讀標籤在 index 1、用 SheetJS 讀卻在 index 0。所以前三欄都掃。
+  function rowByLabel(kw){
+    for(var r=0;r<aoa.length;r++){
+      var row=aoa[r];
+      if(!row)continue;
+      for(var c=0;c<Math.min(3,row.length);c++){
+        if(row[c]!=null&&String(row[c]).indexOf(kw)>=0)return row;
+      }
+    }
+    return null;
+  }
+  var effRow=rowByLabel('排線效率');
+  var dayRow=rowByLabel('工作天');
+  if(!effRow)return;
+
+  // 直接掃整列標題找「N月 X旬」，欄位偏移多少都無所謂
+  var hdr=aoa[0]||[];
+  var months=[],cur=null,prevMonNum=null,year=refY;
+  for(var c=0;c<hdr.length;c++){
+    var h=hdr[c]==null?'':String(hdr[c]).replace(/\s+/g,'');
+    var m=h.match(/^(\d{1,2})月(上旬|中旬|下旬)$/);
+    if(!m)continue;
+    var monNum=+m[1], tenName=m[2];
+    if(prevMonNum!==null&&monNum<prevMonNum)year++;   // 月份變小＝跨年
+    prevMonNum=monNum;
+    var ym=year+'-'+String(monNum).padStart(2,'0');
+    if(!cur||cur.ym!==ym){cur={ym:ym,label:monNum+'月',year:year,mon:monNum,ten:[]};months.push(cur);}
+    var ev=parseFloat(effRow[c]);
+    var dv=dayRow?parseFloat(dayRow[c]):NaN;
+    cur.ten.push({name:tenName,eff:isFinite(ev)?ev:null,days:isFinite(dv)?dv:null});
+  }
+  if(months.length)ppTenDayMap[mk]={refYmd:refYmd,refYm:refY+'-'+String(refM).padStart(2,'0'),months:months};
+}
+
+/* 今天落在哪一旬：1–10 上旬、11–20 中旬、21– 下旬 */
+function tenDayNameOf(d){var day=d.getDate();return day<=10?'上旬':day<=20?'中旬':'下旬';}
+
 function parsePPPlanSheet(wb, mk){
   ppPlanDataMap[mk]={};
   var ppSheet=wb.Sheets['Production_Planning']||wb.Sheets['Production Planning'];
@@ -1891,6 +1959,11 @@ function handleCapacityFile(file){
 
       // Parse Production_Planning sheet for per-line, per-style allocate qty (mk now known)
       parsePPPlanSheet(wb, mk);
+      // 同一份檔案也帶三旬排線目標（效率趨勢上方那排要用）
+      parsePPTenDaySheet(wb, mk);
+      // 產能檔是非同步讀的，可能比 Target Per Hari 晚完成；切分頁不會重畫，
+      // 所以解析完要主動刷新一次，否則三旬目標那排會一直是空的。
+      if(typeof effTrendDays!=='undefined'&&effTrendDays.length){try{renderEffTrendTab();}catch(ex){}}
       // Parse B02 sheet for per-line, per-style daily target
       parseB02Sheet(wb, mk);
 
@@ -6852,6 +6925,7 @@ function handlePPScheduleFile(file){
         return fname.replace(/\.[^.]+$/,'');
       })(file.name);
       parsePPPlanSheet(wb,mk);
+      parsePPTenDaySheet(wb,mk);
       var holRes=parseHolidaysTableSheet(wb);
       if(holRes.sheetName)cpoProgPpHolidaysInfo=holRes.sheetName+'：新增 '+holRes.addedCount+' 筆假日（目前共 '+Object.keys(holidaySet).length+' 筆）';
     }catch(ex){console.warn('PP Schedule parse error:',ex);}
@@ -7178,6 +7252,45 @@ function renderEffTrendTab(){
         +'</span>';
     }).filter(Boolean).join('');
     el.innerHTML=chips?('<span style="font-size:11px;color:#64748b;font-weight:700">當日總體效率</span>'+chips):'';
+  }());
+
+  // 三旬排線目標效率（PP Schedule）。跟著目前選的廠走，才不會把甲廠的目標掛在乙廠上。
+  (function(){
+    var bar=document.getElementById('eff-tenday-bar');
+    if(!bar)return;
+    var td=ppTenDayMap[effTrendFactory];
+    if(!td||!td.months.length){
+      bar.style.display=Object.keys(ppTenDayMap).length?'flex':'none';
+      bar.innerHTML=Object.keys(ppTenDayMap).length
+        ? '<span style="font-size:11px;color:#94a3b8">排線目標效率：尚未上傳 '+escHtml(effTrendFactory||'本廠')+' 的 PP Schedule</span>'
+        : '';
+      return;
+    }
+    var now=new Date();
+    var curYm=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var mi=td.months.findIndex(function(m){return m.ym===curYm;});
+    if(mi<0)mi=0;                       // 檔案裡沒有本月就退回第一個月
+    var mo=td.months[mi], nxt=td.months[mi+1]||null;
+    var curTen=(mo.ym===curYm)?tenDayNameOf(now):null;
+    var nxtTip=nxt?('\n\n'+nxt.label+'：'+nxt.ten.map(function(t){
+        return t.name+' '+(t.eff!=null?Math.round(t.eff*100)+'%':'—');}).join('　')):'';
+    var chips=mo.ten.map(function(t){
+      var on=(t.name===curTen);
+      var pct=t.eff!=null?Math.round(t.eff*100)+'%':'—';
+      var tip=mo.label+t.name+'　排線目標 '+pct+(t.days!=null?('　工作天 '+t.days):'')
+        +(on?'\n（今天就在這一旬）':'')+nxtTip;
+      return '<span title="'+escHtml(tip)+'" style="display:inline-flex;align-items:center;gap:4px;'
+        +'border-radius:100px;padding:3px 10px;'
+        +(on?'background:#1e3a8a;border:1px solid #1e3a8a':'background:#fff;border:1px solid #e2e8f0')+'">'
+        +'<span style="font-size:10px;font-weight:700;color:'+(on?'#bfdbfe':'#94a3b8')+'">'+t.name+'</span>'
+        +'<span style="font-size:13px;font-weight:800;color:'+(on?'#fff':'#475569')+'">'+pct+'</span>'
+        +(on?'<span style="font-size:9px;color:#bfdbfe">本旬</span>':'')
+        +'</span>';
+    }).join('');
+    bar.style.display='flex';
+    bar.innerHTML='<span style="font-size:11px;color:#64748b;font-weight:700" '
+      +'title="'+escHtml('來自 PP Schedule 的 B04_Capacity_Three_of_Month（排線效率）'+(td.refYmd?'\n檔案基準日 '+td.refYmd:''))+'">'
+      +'排線目標效率 · '+escHtml(effTrendFactory)+' · '+escHtml(mo.label)+'</span>'+chips;
   }());
 
   // Legend
