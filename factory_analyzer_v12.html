@@ -312,7 +312,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-08b</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-15</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -967,8 +967,11 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
             <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:3px;display:inline-block;background:#dc2626;border-radius:2px"></span>&lt; 80%</span>
           </div>
         </div>
-        <!-- Factory selector (if multiple factories uploaded) -->
-        <div id="eff-factory-bar" style="display:none;gap:6px;margin-bottom:10px"></div>
+        <!-- Factory selector (if multiple factories uploaded) + 各廠當日總體效率（靠右） -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <div id="eff-factory-bar" style="display:none;gap:6px"></div>
+          <div id="eff-factory-summary" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
+        </div>
         <!-- Cards grid -->
         <div id="eff-trend-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px"></div>
       </div>
@@ -7103,6 +7106,44 @@ function handleEffTrendFile(file){
   reader.readAsArrayBuffer(file);
 }
 
+/* 這一組當天的整體效率（大字％與週平均都用它）：
+   優先用檔案自己算好的 prosentase —— 它就等於該組所有列的效率總和，是最準的。
+   沒有的話再把各款效率加總。舊版取「各款最大值」，一組同時跑兩款時會少算另一款
+   （例如 6-05 同時跑 CPW264TL38 2.4% 與 LPST840 113.6%，整組其實是 116.0%）。
+   （2026-09-15 從 renderEffTrendTab() 裡面提出來，廠級總體效率也要用。） */
+function lineEff(ld){
+  if(!ld)return null;
+  if(ld.prosentase>0)return ld.prosentase;
+  var ps=ld.perStyle||{};
+  var sum=0;
+  Object.keys(ps).forEach(function(k){sum+=ps[k]||0;});
+  return sum>0?sum:null;
+}
+
+/* 一個廠「最新那天」的總體效率。
+   效率＝實際產出÷標準產出，所以整廠要用**可用工時加權**，不能把各組的百分比直接平均——
+   37 人的線跟 4 人的線權重不該一樣。權重取 人數 × JKK（當天可用工時）。
+   萬一整廠都沒有工時資料，才退回算術平均，並在提示框標明。 */
+function effFactoryOverall(fac){
+  var days=effTrendDays.filter(function(d){return d.factory===fac;});
+  if(!days.length)return null;
+  var last=days[days.length-1];
+  var sumW=0,sumEW=0,simple=0,n=0;
+  Object.keys(last.lines||{}).forEach(function(l){
+    var ld=last.lines[l];
+    var e=lineEff(ld);
+    if(e===null)return;
+    var w=(ld.persons||0)*(ld.jkk||0);
+    if(w>0){sumW+=w;sumEW+=e*w;}
+    simple+=e;n++;
+  });
+  if(!n)return null;
+  var weighted=sumW>0;
+  return {fac:fac,date:last.date,lines:n,weighted:weighted,manhours:Math.round(sumW),
+          pct:Math.round((weighted?sumEW/sumW:simple/n)*100),
+          simplePct:Math.round(simple/n*100)};
+}
+
 function renderEffTrendTab(){
   var myDays=effTrendDays.filter(function(d){return !effTrendFactory||d.factory===effTrendFactory;});
   if(!myDays.length)return;
@@ -7113,6 +7154,31 @@ function renderEffTrendTab(){
   // Build date labels
   var dates=myDays.map(function(d){return d.date;});
   var dlabels=dates.map(function(d){var m=d.match(/\d{4}\/(\d{2})\/(\d{2})/);return m?parseInt(m[1])+'/'+parseInt(m[2]):d;});
+
+  // 右上角：各廠當日總體效率（以可用工時加權）
+  (function(){
+    var el=document.getElementById('eff-factory-summary');
+    if(!el)return;
+    var facs=[];
+    effTrendDays.forEach(function(d){if(d.factory&&facs.indexOf(d.factory)<0)facs.push(d.factory);});
+    var chips=facs.map(function(f){
+      var o=effFactoryOverall(f);
+      if(!o)return '';
+      var c=o.pct>=100?'#16a34a':o.pct>=80?'#d97706':'#dc2626';
+      var bg=o.pct>=100?'#f0fdf4':o.pct>=80?'#fffbeb':'#fef2f2';
+      var bd=o.pct>=100?'#86efac':o.pct>=80?'#fde68a':'#fca5a5';
+      var tip=f+'　'+o.date+'\n'+o.lines+' 組'
+        +(o.weighted?('\n以可用工時加權（合計 '+o.manhours.toLocaleString()+' 工時）\n未加權算術平均為 '+o.simplePct+'%')
+                    :'\n⚠ 當天沒有人數／JKK，改用算術平均');
+      return '<span title="'+escHtml(tip)+'" style="display:inline-flex;align-items:center;gap:5px;'
+        +'background:'+bg+';border:1px solid '+bd+';border-radius:100px;padding:3px 10px">'
+        +'<span style="font-size:10px;font-weight:700;color:#475569">'+escHtml(f)+'</span>'
+        +'<span style="font-size:13px;font-weight:800;color:'+c+'">'+o.pct+'%</span>'
+        +(o.weighted?'':'<span style="font-size:9px;color:#dc2626">*</span>')
+        +'</span>';
+    }).filter(Boolean).join('');
+    el.innerHTML=chips?('<span style="font-size:11px;color:#64748b;font-weight:700">當日總體效率</span>'+chips):'';
+  }());
 
   // Legend
   var legHtml='<span style="font-size:11px;font-weight:700;color:#64748b;margin-right:6px">已載入：</span>';
@@ -7179,18 +7245,6 @@ function renderEffTrendTab(){
         histStyleSeries[lab][di]=(cur===null?0:cur)+v;
       });
     });
-    // 這一組當天的整體效率（大字％與週平均都用它）：
-    // 優先用檔案自己算好的 prosentase —— 它就等於該組所有列的效率總和，是最準的。
-    // 沒有的話再把各款效率加總。舊版取「各款最大值」，一組同時跑兩款時會少算另一款
-    // （例如 6-05 同時跑 CPW264TL38 2.4% 與 LPST840 113.6%，整組其實是 116.0%）。
-    function lineEff(ld){
-      if(!ld)return null;
-      if(ld.prosentase>0)return ld.prosentase;
-      var ps=ld.perStyle||{};
-      var sum=0;
-      Object.keys(ps).forEach(function(k){sum+=ps[k]||0;});
-      return sum>0?sum:null;
-    }
     var series=dates.map(function(d,di){
       var day=myDays[di];
       var ld=day&&day.lines[line];
@@ -7310,7 +7364,10 @@ function renderEffTrendTab(){
         +'<span style="width:12px;height:3px;border-radius:2px;'
           +(isProjOnly?'background:none;border-top:2px dashed '+col+';':'background:'+col+';')
           +'display:inline-block;flex-shrink:0"></span>'
-        +'<span style="'+(isProjOnly?'font-style:italic;color:#94a3b8':'')+'">'+escHtml(s)+'</span></span>';
+        // 正在走的款放大到 13px 粗體；未來排線的維持 10px 斜體灰，一眼分得出來
+        +'<span style="'+(isProjOnly?'font-size:10px;font-style:italic;color:#94a3b8'
+                                    :'font-size:13px;font-weight:700;color:#334155;letter-spacing:-.01em')
+          +'">'+escHtml(s)+'</span></span>';
     }).join('<span style="color:#cbd5e1;margin:0 2px">/</span>');
 
     html+='<div style="background:#fff;border:1px solid '+effBorder+';border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.05);display:flex;flex-direction:column;gap:0">'
