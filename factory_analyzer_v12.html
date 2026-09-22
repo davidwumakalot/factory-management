@@ -43,6 +43,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft J
 .filter-group label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
 .filter-group select,.filter-group input{font-size:13px;height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-dark)}
 .filter-group select:focus,.filter-group input:focus{outline:none;border-color:var(--primary)}
+/* 篩選列上的一鍵切換鈕（結案款、單位）。高度跟 select 對齊，開啟時整顆變深藍。 */
+.ftoggle{font-size:13px;font-weight:600;height:34px;padding:0 12px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-dark);cursor:pointer;white-space:nowrap;transition:all .15s}
+.ftoggle:hover{background:#f1f5f9;border-color:#cbd5e1}
+.ftoggle.on{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 2px 4px rgba(30,58,138,.15)}
+.ftoggle.on:hover{background:var(--primary-hover)}
 /* Month checkbox group */
 .month-filter-wrap{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 20px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .month-filter-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
@@ -312,7 +317,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-15b</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-22</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -516,10 +521,12 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
             </select>
           </div>
           <div class="filter-group"><label>結案款</label>
-            <select id="f-ended" onchange="onFilter()" title="最後一個有數量的出口月份早於本月＝已結束">
-              <option value="">全部顯示</option>
-              <option value="hide">隱藏本月前已結束</option>
-            </select>
+            <button id="f-ended-btn" class="ftoggle" onclick="toggleHideEnded()"
+              title="整款最後一個有數量的出口月份早於本月＝已結束（上月結束就隱藏）。本月或下個月還有量的照常顯示。">全部顯示</button>
+          </div>
+          <div class="filter-group"><label>單位</label>
+            <button id="f-unit-btn" class="ftoggle" onclick="toggleTblUnit()"
+              title="切換整張表的數量單位。標打數＝排單檔的 CPO_QTYIE（件數 ÷ 12 × IE）。月份格、本週 Total、小計列與 Excel 匯出都會跟著換。">📦 件數 PCS</button>
           </div>
           <div style="margin-left:auto;font-size:11px;color:#64748b;align-self:center" id="sketch-status"></div>
         </div>
@@ -3034,6 +3041,40 @@ function currentYM(){
 }
 var endedHiddenCount=0;   // 這次篩選被「已結束」規則擋掉幾筆，顯示在筆數旁邊
 
+/* 結案款一鍵鈕。規則沒變（lastMonth < 本月＝已結束），只是從下拉選單改成按一下就切。 */
+var hideEndedOn=false;
+function toggleHideEnded(){
+  hideEndedOn=!hideEndedOn;
+  var b=document.getElementById('f-ended-btn');
+  if(b){
+    b.className='ftoggle'+(hideEndedOn?' on':'');
+    b.textContent=hideEndedOn?'已隱藏上月結束':'全部顯示';
+  }
+  onFilter();
+}
+
+/* 明細表的數量單位。'pcs'＝件數（monthly／curTotal），'dz'＝標打數（monthlyQtyIE／curTotalQtyIE）。
+   表格、小計、排序、Excel 匯出統一走下面這幾支取值函式，才不會有的地方件數有的地方標打。
+   標打數是浮點數，**在每一列就先四捨五入**再往上加——這樣小計才會剛好等於畫面上各列相加，
+   不會出現「自己按計算機加起來跟小計差 1」的情況。 */
+var tblUnit='pcs';
+function toggleTblUnit(){
+  tblUnit=(tblUnit==='pcs')?'dz':'pcs';
+  var b=document.getElementById('f-unit-btn');
+  if(b){
+    b.className='ftoggle'+(tblUnit==='dz'?' on':'');
+    b.textContent=(tblUnit==='dz'?'📐 標打數 DZ':'📦 件數 PCS');
+  }
+  onFilter();
+}
+function uRound(v){return tblUnit==='dz'?Math.round(v||0):(v||0);}
+function uMon(d,m){return uRound(tblUnit==='dz'?((d.monthlyQtyIE&&d.monthlyQtyIE[m])||0):(d.monthly[m]||0));}
+function uDlt(d,m){return uRound(tblUnit==='dz'?((d.deltaQtyIE&&d.deltaQtyIE[m])||0):(d.delta[m]||0));}
+function uCurT(d){return uRound(tblUnit==='dz'?(d.curTotalQtyIE||0):d.curTotal);}
+function uPrevT(d){return uRound(tblUnit==='dz'?(d.prevTotalQtyIE||0):d.prevTotal);}
+function uDltT(d){return uRound(tblUnit==='dz'?(d.totalDeltaQtyIE||0):d.totalDelta);}
+function unitLabel(){return tblUnit==='dz'?'標打數':'件數';}
+
 function filtered(){
   var mk=document.getElementById('f-mk').value;
   var cust=document.getElementById('f-cust').value;
@@ -3041,8 +3082,7 @@ function filtered(){
   var style=document.getElementById('f-style').value.toLowerCase();
   var minpcs=parseFloat(document.getElementById('f-min').value)||0;
   var status=document.getElementById('f-status').value;
-  var endedEl=document.getElementById('f-ended');
-  var hideEnded=endedEl?endedEl.value==='hide':false;
+  var hideEnded=hideEndedOn;
   var thisYM=currentYM();
   endedHiddenCount=0;
   return compData.filter(function(d){
@@ -3068,7 +3108,7 @@ function onFilter(){
   var data=filtered();
   // Only show months that have at least one non-zero value in the filtered data
   var activeMths=getActiveMths().filter(function(m){
-    return data.some(function(d){return (d.monthly[m]||0)>0;});
+    return data.some(function(d){return uMon(d,m)>0;});
   });
   if(currentTab==='table')updateMetrics(data,activeMths);
   render(data,activeMths);
@@ -3154,7 +3194,7 @@ function restoreAll(){excludedIds={};onFilter();}
 function buildTableHeader(activeMths){
   var cols=[{k:'mk',l:'MK',c:'left'},{k:'cust',l:'Cust',c:'left'},{k:'fstyle',l:'F_Style',c:'left'},{k:'pi',l:'Product Item',c:'left'},{k:'sp',l:'Special',c:'left'},{k:'crfp2',l:'CRFP2',c:'left'},{k:'ie',l:'IE',c:''}];
   activeMths.forEach(function(m){cols.push({k:'m_'+m,l:m.replace(/^\d{4}-/,''),c:''}); });
-  cols.push({k:'total',l:'本週 Total',c:''});
+  cols.push({k:'total',l:tblUnit==='dz'?'本週 標打':'本週 Total',c:''});
 
   // Fixed pixel widths for non-month columns
   var fixedW={mk:44,cust:50,fstyle:130,pi:100,sp:104,crfp2:76,ie:62,total:72};
@@ -3183,11 +3223,11 @@ function render(data,activeMths){
   if(sortCol){data=data.slice().sort(function(a,b){
     var av,bv;
     if(sortCol==='total'){
-      av=a.status==='removed'?a.prevTotal:a.curTotal;
-      bv=b.status==='removed'?b.prevTotal:b.curTotal;
+      av=a.status==='removed'?uPrevT(a):uCurT(a);
+      bv=b.status==='removed'?uPrevT(b):uCurT(b);
     } else if(sortCol.indexOf('m_')===0){
-      av=a.monthly[sortCol.slice(2)]||0;
-      bv=b.monthly[sortCol.slice(2)]||0;
+      av=uMon(a,sortCol.slice(2));
+      bv=uMon(b,sortCol.slice(2));
     } else if(sortCol==='sp'){
       // sp 是陣列，直接相減會變 NaN，改用組好的字串排序（沒工法的排最後）
       av=a.spStr||'￿'; bv=b.spStr||'￿';
@@ -3207,12 +3247,12 @@ function render(data,activeMths){
     Object.keys(grouped[mk]).sort().forEach(function(cust){
       grouped[mk][cust].forEach(function(d){
         count++;
-        var rowTotal = d.status==='removed' ? d.prevTotal : d.curTotal;
+        var rowTotal = d.status==='removed' ? uPrevT(d) : uCurT(d);
         var mCells=activeMths.map(function(m){
-          var v=d.monthly[m]||0;
+          var v=uMon(d,m);
           var cellHtml='<span class="cell-main">'+(v?v.toLocaleString():'—')+'</span>';
           if(d.status==='normal'){
-            var dlt=d.delta[m];
+            var dlt=uDlt(d,m);
             if(dlt){
               var cls=dlt>0?'up':'down';
               var arrow=dlt>0?'▲':'▼';
@@ -3245,11 +3285,11 @@ function render(data,activeMths){
           '<td class="po-btn-col"><button class="po-btn" onclick="openPoPanel(event,'+d._id+')">PO</button></td></tr>';
       });
       var ct=grouped[mk][cust];
-      var cCur=ct.reduce(function(s,d){return s+(d.status==='removed'?0:d.curTotal);},0);
-      var cMo=activeMths.map(function(m){return ct.reduce(function(s,d){return s+(d.monthly[m]||0);},0);});
+      var cCur=ct.reduce(function(s,d){return s+(d.status==='removed'?0:uCurT(d));},0);
+      var cMo=activeMths.map(function(m){return ct.reduce(function(s,d){return s+uMon(d,m);},0);});
       var cIE=ct.reduce(function(s,d){return s+d.ie;},0)/ct.length;
-      var cTotal=ct.reduce(function(s,d){return s+(d.status==='removed'?d.prevTotal:d.curTotal);},0);
-      rows+='<tr class="sub"><td></td><td></td><td class="left" style="font-size:11px;color:#475569;padding-left:24px">'+cust+' 小計</td><td></td><td></td><td></td><td></td>'+
+      var cTotal=ct.reduce(function(s,d){return s+(d.status==='removed'?uPrevT(d):uCurT(d));},0);
+      rows+='<tr class="sub"><td></td><td></td><td class="left" style="font-size:11px;color:#475569;padding-left:24px">'+cust+' 小計'+(tblUnit==='dz'?' DZ':'')+'</td><td></td><td></td><td></td><td></td>'+
         '<td><div class="ie-wrap"><span class="ie-num">'+cIE.toFixed(2)+'</span></div></td>'+
         cMo.map(function(v){return '<td>'+(v?v.toLocaleString():'—')+'</td>';}).join('')+
         '<td>'+cTotal.toLocaleString()+'</td><td class="po-btn-col"></td></tr>';
@@ -3258,7 +3298,8 @@ function render(data,activeMths){
   if(!rows)rows='<tr><td colspan="'+span+'" style="text-align:center;padding:3rem;color:#64748b">無符合資料</td></tr>';
   document.getElementById('tbody').innerHTML=rows;
   document.getElementById('row-count').textContent='共 '+count+' 筆款式'
-    +(endedHiddenCount?'（已隱藏 '+endedHiddenCount+' 筆本月前結束）':'');
+    +(endedHiddenCount?'（已隱藏 '+endedHiddenCount+' 筆上月前結束）':'')
+    +(tblUnit==='dz'?'　・　數量單位：標打數 CPO_QTYIE':'');
 }
 
 /* ===================== Overview: MK multi-select dropdown ===================== */
@@ -6282,7 +6323,8 @@ function exportHtmlSnapshot(){
       '<tr><td>篩選 - 款式</td><td>'+filterStyle+'</td></tr>'+
       '<tr><td>篩選 - 最小PCS</td><td>'+filterMin+'</td></tr>'+
       '<tr><td>篩選 - 狀態</td><td>'+filterStatus+'</td></tr>'+
-      '<tr><td>篩選 - 結案款</td><td>'+((document.getElementById('f-ended')||{}).value==='hide'?'已隱藏本月前結束':'全部顯示')+'</td></tr>'+
+      '<tr><td>篩選 - 結案款</td><td>'+(hideEndedOn?'已隱藏上月結束':'全部顯示')+'</td></tr>'+
+      '<tr><td>數量單位</td><td>'+unitLabel()+(tblUnit==='dz'?'（CPO_QTYIE）':'（PCS）')+'</td></tr>'+
       '<tr><td>排除款數</td><td>'+excludedList.length+'</td></tr>'+
       (excludedList.length?'<tr><td>排除款式</td><td>'+excludedList.join('<br>')+'</td></tr>':'')+
       '</tbody></table>';
@@ -6711,14 +6753,21 @@ document.addEventListener('click',function(e){
 });
 
 /* ===================== Export helpers ===================== */
-function makeHeader(mths){return ['狀態','MK','Cust','F_Style','PRODUCT_ITEM','SPECIAL','CRFP2','IE'].concat(mths).concat(['本週Total','上週Total','差異']);}
+/* 匯出的數字跟著畫面上的「單位」鈕走，所以標題列要標清楚是件數還是標打數，
+   免得兩種單位的檔案混在一起分不出來。 */
+function makeHeader(mths){
+  var u=tblUnit==='dz'?'（標打數）':'（件數）';
+  return ['狀態','MK','Cust','F_Style','PRODUCT_ITEM','SPECIAL','CRFP2','IE']
+    .concat(mths.map(function(m){return m+u;}))
+    .concat(['本週Total'+u,'上週Total'+u,'差異'+u]);
+}
 function statusLabel(s){return s==='new'?'新增':(s==='removed'?'移除':'');}
 
 function dataToRows(data,mths){
   return [makeHeader(mths)].concat(data.map(function(d){
     return [statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.spStr||'',d.crfp2||'',+d.ie.toFixed(2)]
-      .concat(mths.map(function(m){return d.monthly[m]||0;}))
-      .concat([d.curTotal,d.prevTotal,d.totalDelta]);
+      .concat(mths.map(function(m){return uMon(d,m);}))
+      .concat([uCurT(d),uPrevT(d),uDltT(d)]);
   }));
 }
 
@@ -6731,28 +6780,28 @@ function buildSummaryRows(data,mths){
     Object.keys(grouped[mk]).sort().forEach(function(cust){
       grouped[mk][cust].forEach(function(d){
         rows.push([statusLabel(d.status),d.mk,d.cust,d.fstyle,d.pi,d.spStr||'',d.crfp2||'',+d.ie.toFixed(2)]
-          .concat(mths.map(function(m){return d.monthly[m]||0;}))
-          .concat([d.curTotal,d.prevTotal,d.totalDelta]));
+          .concat(mths.map(function(m){return uMon(d,m);}))
+          .concat([uCurT(d),uPrevT(d),uDltT(d)]));
       });
       var ct=grouped[mk][cust];
-      var cCur=ct.reduce(function(s,d){return s+d.curTotal;},0);
-      var cPrev=ct.reduce(function(s,d){return s+d.prevTotal;},0);
+      var cCur=ct.reduce(function(s,d){return s+uCurT(d);},0);
+      var cPrev=ct.reduce(function(s,d){return s+uPrevT(d);},0);
       rows.push(['','',cust+' 小計','','','','',(ct.reduce(function(s,d){return s+d.ie;},0)/ct.length).toFixed(2)]
-        .concat(mths.map(function(m){return ct.reduce(function(s,d){return s+(d.monthly[m]||0);},0);}))
+        .concat(mths.map(function(m){return ct.reduce(function(s,d){return s+uMon(d,m);},0);}))
         .concat([cCur,cPrev,cCur-cPrev]));
       subtotalRows.add(rows.length-1);
     });
     var am=[].concat.apply([],Object.values(grouped[mk]));
-    var mCur=am.reduce(function(s,d){return s+d.curTotal;},0);
-    var mPrev=am.reduce(function(s,d){return s+d.prevTotal;},0);
+    var mCur=am.reduce(function(s,d){return s+uCurT(d);},0);
+    var mPrev=am.reduce(function(s,d){return s+uPrevT(d);},0);
     rows.push(['',mk+' 合計','','','','','',(am.reduce(function(s,d){return s+d.ie;},0)/am.length).toFixed(2)]
-      .concat(mths.map(function(m){return am.reduce(function(s,d){return s+(d.monthly[m]||0);},0);}))
+      .concat(mths.map(function(m){return am.reduce(function(s,d){return s+uMon(d,m);},0);}))
       .concat([mCur,mPrev,mCur-mPrev]));
     totalRows.add(rows.length-1);
   });
-  var gCur=data.reduce(function(s,d){return s+d.curTotal;},0);
-  var gPrev=data.reduce(function(s,d){return s+d.prevTotal;},0);
-  rows.push(['GRAND TOTAL','','','','','','',''].concat(mths.map(function(m){return data.reduce(function(s,d){return s+(d.monthly[m]||0);},0);})).concat([gCur,gPrev,gCur-gPrev]));
+  var gCur=data.reduce(function(s,d){return s+uCurT(d);},0);
+  var gPrev=data.reduce(function(s,d){return s+uPrevT(d);},0);
+  rows.push(['GRAND TOTAL','','','','','','',''].concat(mths.map(function(m){return data.reduce(function(s,d){return s+uMon(d,m);},0);})).concat([gCur,gPrev,gCur-gPrev]));
   totalRows.add(rows.length-1);
   return {rows:rows, subtotalRows:subtotalRows, totalRows:totalRows};
 }
