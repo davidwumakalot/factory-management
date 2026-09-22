@@ -317,7 +317,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-22b</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-22c</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -7409,7 +7409,7 @@ function renderEffFactoryCard(){
     {'整廠':t.hist.map(function(h){return h.eff;})},
     t.labels, {'整廠':'#1e3a8a'},
     t.proj.slice(), t.projLabels, t.proj.map(function(){return '整廠';}),
-    {W:availW,H:132,allLabels:true});
+    {W:availW,H:148,allLabels:true,allValues:true});
 
   var tipHist='各天以可用工時加權（人數 × JKK），跟右上角當日總體效率同一套算法'
     +(t.last.weighted?'':'\n⚠ 最新那天沒有人數／JKK，改用算術平均');
@@ -7712,7 +7712,11 @@ function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels
   dim=dim||{};
   while(projSeries.length>0&&projSeries[projSeries.length-1]===null)projSeries.pop();
 
-  var W=dim.W||264,H=dim.H||68,PL=4,PR=projSeries.length?18:16,PT=10,PB=18;
+  // 每點都標數字時上面要多留一點，不然最高的那點的百分比會壓到卡片標題
+  var W=dim.W||264,H=dim.H||68,
+      PL=dim.allValues?18:4,
+      PR=dim.allValues?34:(projSeries.length?18:16),
+      PT=dim.allValues?18:10,PB=18;
   var iW=W-PL-PR,iH=H-PT-PB;
   var styleKeys=Object.keys(histStyleSeries||{});
   var histN=(styleKeys.length&&histStyleSeries[styleKeys[0]])?histStyleSeries[styleKeys[0]].length:0;
@@ -7787,9 +7791,13 @@ function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels
         dateLabelSet[i]=true;
         svg+='<text x="'+cx+'" y="'+(H-2)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+escHtml(labels[i]||'')+'</text>';
       }
-      // Value label on last point per style
-      if(isLast&&v>0){
-        svg+='<text x="'+(cx+(cx>W*0.75?-4:4))+'" y="'+(cy-6)+'" text-anchor="'+(cx>W*0.75?'end':'start')+'" font-size="9" fill="'+col+'" font-weight="700">'+Math.round(v*100)+'%</text>';
+      // Value label：小卡只標最後一點（空間不夠），整廠卡（allValues）每一點都標
+      if(v>0&&(isLast||dim.allValues)){
+        if(dim.allValues&&!isLast){
+          svg+='<text x="'+cx+'" y="'+(cy-7)+'" text-anchor="middle" font-size="9" fill="'+col+'" font-weight="700" opacity="0.9">'+Math.round(v*100)+'%</text>';
+        } else {
+          svg+='<text x="'+(cx+(cx>W*0.75?-4:4))+'" y="'+(cy-6)+'" text-anchor="'+(cx>W*0.75?'end':'start')+'" font-size="9" fill="'+col+'" font-weight="700">'+Math.round(v*100)+'%</text>';
+        }
       }
     });
   });
@@ -7824,7 +7832,15 @@ function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels
     var lpv=projSeries[lastProjIdx];
     var lpx2=px(histN+lastProjIdx),lpy2=py(lpv);
     var lpCol=projColor(lastProjIdx);
-    svg+='<text x="'+(lpx2+(lpx2>W*0.75?-4:4))+'" y="'+(lpy2-5)+'" text-anchor="'+(lpx2>W*0.75?'end':'start')+'" font-size="8.5" fill="'+lpCol+'" font-style="italic">'+Math.round(lpv*100)+'%</text>';
+    if(dim.allValues){
+      // 整廠卡：每個投影點都標（斜體，跟實際值區隔）
+      projSeries.forEach(function(v,pi){
+        if(v===null)return;
+        svg+='<text x="'+px(histN+pi)+'" y="'+(py(v)-7)+'" text-anchor="middle" font-size="9" fill="'+projColor(pi)+'" font-style="italic" opacity="0.9">'+Math.round(v*100)+'%</text>';
+      });
+    } else {
+      svg+='<text x="'+(lpx2+(lpx2>W*0.75?-4:4))+'" y="'+(lpy2-5)+'" text-anchor="'+(lpx2>W*0.75?'end':'start')+'" font-size="8.5" fill="'+lpCol+'" font-style="italic">'+Math.round(lpv*100)+'%</text>';
+    }
     if(dim.allLabels){
       projSeries.forEach(function(v,pi){
         if(v===null)return;
