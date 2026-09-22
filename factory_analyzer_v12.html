@@ -317,7 +317,7 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
     <div class="top-bar">
       <span style="font-size:14px;font-weight:600;color:#1e3a8a">📊 排單數據比較分析工具
         <span id="app-build" style="font-size:10px;font-weight:600;color:#94a3b8;margin-left:6px;letter-spacing:.02em"
-              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-22</span>
+              title="開啟的檔案版本。發現數字跟預期不同時先看這裡，確認不是開到舊版或瀏覽器快取。">v12 · 2026-09-22b</span>
       </span>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;color:#64748b" id="file-info"></span>
@@ -981,6 +981,8 @@ tbody tr:hover .po-btn-col{background:#f1f5f9!important}
         </div>
         <!-- 三旬排線目標效率（來自 PP Schedule 的 B04_Capacity_Three_of_Month），給上面的實際值做參照 -->
         <div id="eff-tenday-bar" style="display:none;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;justify-content:flex-end"></div>
+        <!-- 整廠效率走勢（7 天實際 + PP 排線投影），不受下面各組卡片的搜尋／篩選影響 -->
+        <div id="eff-factory-card" style="display:none;margin-bottom:12px"></div>
         <!-- Cards grid -->
         <div id="eff-trend-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px"></div>
       </div>
@@ -7267,6 +7269,177 @@ function effFactoryOverall(fac){
           simplePct:Math.round(simple/n*100)};
 }
 
+/* 未來 7 天的日期（今天不算，從明天開始）。各組卡片與整廠卡片要對齊同一組日期，
+   所以抽出來共用，不要各算各的。 */
+function effProjDates(){
+  var n=new Date();
+  var base=new Date(n.getFullYear(),n.getMonth(),n.getDate(),23,59,59).getTime();
+  var ms=[],labels=[];
+  for(var pd=1;pd<=7;pd++){
+    var t=new Date(base+pd*86400000);
+    ms.push(t.getTime());
+    labels.push((t.getMonth()+1)+'/'+t.getDate());
+  }
+  return {ms:ms,labels:labels};
+}
+
+/* 某一組在 PP Schedule 裡的排線批次。先找該廠，找不到再掃其他廠（有些檔案廠別標法不一致）。 */
+function effPPEntriesForLine(fac,line){
+  var ppLineMap=ppPlanDataMap[fac]||null;
+  if(!ppLineMap){
+    Object.keys(ppPlanDataMap).forEach(function(f){
+      if(ppLineMap)return;
+      var m=ppPlanDataMap[f];
+      if(m&&Object.keys(m).some(function(k){return k.split('|')[0]===line;}))ppLineMap=m;
+    });
+  }
+  ppLineMap=ppLineMap||{};
+  var entries=[],has=false;
+  Object.keys(ppLineMap).forEach(function(k){
+    if(k.split('|')[0]!==line)return;
+    has=true;
+    ppLineMap[k].forEach(function(e){entries.push(e);});
+  });
+  return {entries:entries,has:has};
+}
+
+/* 某一天該走哪個批次：先找縫製區間蓋住那天的，多筆就取最早完工的那批；
+   都沒蓋到就退回「下一個還沒完工」的批次。 */
+function effPickEntryForDay(ppEntries,dMs){
+  var covering=ppEntries.filter(function(e){
+    if(!e.eff)return false;
+    var after=!e.sewStartMs||dMs>=e.sewStartMs;
+    var before=!e.sewFinMs||dMs<=e.sewFinMs;
+    return after&&before;
+  });
+  if(covering.length){
+    covering.sort(function(a,b){return (a.sewFinMs||Infinity)-(b.sewFinMs||Infinity);});
+    return covering[0];
+  }
+  var upcoming=ppEntries.filter(function(e){
+    return e.eff&&(!e.sewFinMs||e.sewFinMs>=dMs);
+  }).sort(function(a,b){return (a.sewFinMs||Infinity)-(b.sewFinMs||Infinity);});
+  return upcoming.length?upcoming[0]:null;
+}
+
+/* 整廠效率的每日走勢：歷史用各天的實際值，未來用 PP Schedule 的排線效率投影。
+   兩邊都**以可用工時加權**（人數 × JKK），口徑跟右上角那顆當日總體效率完全一樣，
+   否則卡片上的線跟膠囊上的數字會對不起來。
+   投影的權重固定用**最新那天**的人數／JKK——PP Schedule 沒有未來的出勤，
+   假設人力不變是最保守的做法；有排線的組才納入，沒排到的組不算進分母。 */
+function effFactoryTrend(fac){
+  var days=effTrendDays.filter(function(d){return d.factory===fac;});
+  if(!days.length)return null;
+
+  function agg(pairs){          // pairs: [{eff, w}]
+    var sumW=0,sumEW=0,simple=0,n=0;
+    pairs.forEach(function(p){
+      if(p.eff===null||p.eff===undefined)return;
+      if(p.w>0){sumW+=p.w;sumEW+=p.eff*p.w;}
+      simple+=p.eff;n++;
+    });
+    if(!n)return null;
+    return {eff:(sumW>0?sumEW/sumW:simple/n),lines:n,manhours:sumW,weighted:sumW>0};
+  }
+
+  var hist=days.map(function(day){
+    var pairs=[],persons=0;
+    Object.keys(day.lines||{}).forEach(function(l){
+      var ld=day.lines[l], e=lineEff(ld);
+      if(e===null)return;
+      pairs.push({eff:e,w:(ld.persons||0)*(ld.jkk||0)});
+      persons+=(ld.persons||0);
+    });
+    var a=agg(pairs);
+    return {date:day.date,eff:a?a.eff:null,lines:a?a.lines:0,
+            manhours:a?a.manhours:0,persons:persons,weighted:a?a.weighted:false};
+  });
+
+  // 投影：拿最新那天在線的組別，逐日問 PP Schedule 該走哪個批次、目標效率多少
+  var last=days[days.length-1];
+  var pj=effProjDates();
+  var projLines=0;
+  var proj=pj.ms.map(function(dMs){
+    var pairs=[],covered={};
+    Object.keys(last.lines||{}).forEach(function(l){
+      var ld=last.lines[l];
+      var pe=effPPEntriesForLine(fac,l);
+      if(!pe.has)return;
+      var ent=effPickEntryForDay(pe.entries,dMs);
+      if(!ent||!ent.eff)return;
+      covered[l]=1;
+      pairs.push({eff:ent.eff,w:(ld.persons||0)*(ld.jkk||0)});
+    });
+    var a=agg(pairs);
+    if(a&&a.lines>projLines)projLines=a.lines;
+    return a?a.eff:null;
+  });
+
+  var valid=hist.map(function(h){return h.eff;}).filter(function(v){return v!==null;});
+  var avg=valid.length?valid.reduce(function(s,v){return s+v;},0)/valid.length:null;
+  var lastHist=null;
+  hist.forEach(function(h){if(h.eff!==null)lastHist=h;});
+
+  return {fac:fac,hist:hist,proj:proj,projLabels:pj.labels,projLines:projLines,
+          avg:avg,last:lastHist,
+          labels:hist.map(function(h){
+            var m=h.date.match(/\d{4}\/(\d{2})\/(\d{2})/);
+            return m?parseInt(m[1])+'/'+parseInt(m[2]):h.date;
+          })};
+}
+
+/* 整廠效率走勢卡片：7 天實際（實線）＋ 未來 7 天排線投影（虛線），放在各組小卡上面。
+   不受下面「搜尋組號」「只顯示 <100%」影響——那兩個是給組卡用的，整廠要看的是全部。 */
+function renderEffFactoryCard(){
+  var box=document.getElementById('eff-factory-card');
+  if(!box)return;
+  var t=effTrendFactory?effFactoryTrend(effTrendFactory):null;
+  if(!t||!t.last){box.style.display='none';box.innerHTML='';return;}
+
+  var col=function(v){return v>=1.0?'#16a34a':v>=0.8?'#d97706':'#dc2626';};
+  var curPct=Math.round(t.last.eff*100);
+  var avgPct=t.avg!=null?Math.round(t.avg*100):null;
+  var firstProj=t.proj.find(function(v){return v!==null;});
+  var projPct=firstProj!=null?Math.round(firstProj*100):null;
+
+  // 先把容器顯示出來才量得到寬度（display:none 時 clientWidth 是 0），圖才撐得滿整張卡
+  box.style.display='block';
+  var availW=Math.max(600,(box.clientWidth||960)-40);
+  var sparkline=buildEffSparkline(
+    {'整廠':t.hist.map(function(h){return h.eff;})},
+    t.labels, {'整廠':'#1e3a8a'},
+    t.proj.slice(), t.projLabels, t.proj.map(function(){return '整廠';}),
+    {W:availW,H:132,allLabels:true});
+
+  var tipHist='各天以可用工時加權（人數 × JKK），跟右上角當日總體效率同一套算法'
+    +(t.last.weighted?'':'\n⚠ 最新那天沒有人數／JKK，改用算術平均');
+  var tipProj='虛線＝PP Schedule 的排線目標效率投影，權重沿用最新那天的人數／JKK。'
+    +'\n只有排到線的組才計入（最多 '+t.projLines+' 組），沒排線的組不算進分母。';
+
+  box.style.display='block';
+  box.innerHTML=
+    '<div style="background:#fff;border:1px solid #c7d2fe;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(30,58,138,.08)">'
+    +'<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px">'
+      +'<span style="font-size:15px;font-weight:800;color:#1e3a8a;letter-spacing:-.02em">🏭 '+escHtml(t.fac)+' 整廠效率走勢</span>'
+      +'<span style="font-size:10px;color:#94a3b8">實線＝實際　虛線＝PP 排線投影</span>'
+      +'<span style="margin-left:auto;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">'
+        +'<span title="'+escHtml(tipHist)+'"><span style="font-size:10px;color:#94a3b8">最新 '+escHtml(t.last.date)+'</span>'
+          +' <b style="font-size:22px;color:'+col(t.last.eff)+'">'+curPct+'%</b></span>'
+        +(avgPct!==null?'<span><span style="font-size:10px;color:#94a3b8">'+t.hist.length+' 天平均</span>'
+          +' <b style="font-size:15px;color:'+col(t.avg)+'">'+avgPct+'%</b></span>':'')
+        +(projPct!==null?'<span title="'+escHtml(tipProj)+'"><span style="font-size:10px;color:#94a3b8">明日投影</span>'
+          +' <b style="font-size:15px;font-style:italic;color:'+col(firstProj)+'">'+projPct+'%</b></span>'
+          :'<span style="font-size:10px;color:#94a3b8">未來投影：尚未上傳 '+escHtml(t.fac)+' 的 PP Schedule</span>')
+      +'</span>'
+    +'</div>'
+    +'<div style="overflow-x:auto">'+sparkline+'</div>'
+    +'<div style="margin-top:6px;font-size:10px;color:#6b7280">'
+      +t.last.lines+' 組 · '+t.last.persons+' 人 · 合計 '+Math.round(t.last.manhours).toLocaleString()+' 工時'
+      +(t.last.weighted?' · 以可用工時加權':' · ⚠ 無人數／JKK，用算術平均')
+    +'</div>'
+  +'</div>';
+}
+
 function renderEffTrendTab(){
   var myDays=effTrendDays.filter(function(d){return !effTrendFactory||d.factory===effTrendFactory;});
   if(!myDays.length)return;
@@ -7341,6 +7514,9 @@ function renderEffTrendTab(){
       +'title="'+escHtml('來自 PP Schedule 的 B04_Capacity_Three_of_Month（排線效率）'+(td.refYmd?'\n檔案基準日 '+td.refYmd:''))+'">'
       +'排線目標效率 · '+escHtml(effTrendFactory)+' · '+escHtml(mo.label)+'</span>'+chips;
   }());
+
+  // 整廠效率走勢卡片
+  try{renderEffFactoryCard();}catch(ex){}
 
   // Legend
   var legHtml='<span style="font-size:11px;font-weight:700;color:#64748b;margin-right:6px">已載入：</span>';
@@ -7445,60 +7621,18 @@ function renderEffTrendTab(){
     }).join('<span style="color:#cbd5e1;margin:0 2px">/</span>');
 
     // --- PP Schedule projection ---
-    var todayMs=(function(){var n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate(),23,59,59).getTime();}());
-    var projDates=[],projLabels2=[];
-    for(var pd=1;pd<=7;pd++){
-      var pDate=new Date(todayMs+pd*86400000);
-      projDates.push(pDate.getTime());
-      projLabels2.push((pDate.getMonth()+1)+'/'+(pDate.getDate()));
-    }
-    // Find PP data: try exact factory match first, then any factory containing this line
-    var ppLineMap=ppPlanDataMap[effTrendFactory]||null;
-    if(!ppLineMap){
-      Object.keys(ppPlanDataMap).forEach(function(f){
-        if(ppLineMap)return;
-        var m=ppPlanDataMap[f];
-        if(m&&Object.keys(m).some(function(k){return k.split('|')[0]===line;}))ppLineMap=m;
-      });
-    }
-    ppLineMap=ppLineMap||{};
-    var ppRemQty=0,ppHasData=false;
-    // Collect all PP entries for this line (for 排線量 + EFF projection)
-    var ppEntries=[];
-    Object.keys(ppLineMap).forEach(function(k){
-      if(k.split('|')[0]!==line)return;
-      ppHasData=true;
-      ppLineMap[k].forEach(function(e){
-        ppRemQty+=e.qty;
-        ppEntries.push(e);
-      });
-    });
+    var _pj=effProjDates();
+    var projDates=_pj.ms, projLabels2=_pj.labels;
+    var _pe=effPPEntriesForLine(effTrendFactory,line);
+    var ppEntries=_pe.entries, ppHasData=_pe.has;
+    var ppRemQty=ppEntries.reduce(function(s,e){return s+(e.qty||0);},0);
     // Count entries with EFF values (for debug)
     var ppEffCount=ppEntries.filter(function(e){return !!e.eff;}).length;
 
-    // Per-day EFF: find PP entries whose sewing period covers that projected day.
-    // Pick the entry with earliest sewFin (the batch finishing soonest) — returns {eff, style}.
-    function getEffEntryForDay(dMs){
-      var covering=ppEntries.filter(function(e){
-        if(!e.eff)return false;
-        var after=!e.sewStartMs||dMs>=e.sewStartMs;
-        var before=!e.sewFinMs||dMs<=e.sewFinMs;
-        return after&&before;
-      });
-      if(covering.length){
-        covering.sort(function(a,b){return (a.sewFinMs||Infinity)-(b.sewFinMs||Infinity);});
-        return covering[0];
-      }
-      // Fallback: nearest upcoming entry (sewFin >= this day) with EFF, earliest sewFin
-      var upcoming=ppEntries.filter(function(e){
-        return e.eff&&(!e.sewFinMs||e.sewFinMs>=dMs);
-      }).sort(function(a,b){return (a.sewFinMs||Infinity)-(b.sewFinMs||Infinity);});
-      return upcoming.length?upcoming[0]:null;
-    }
     // projSeries2: array of {eff, style} or null
     var projEntries2=projDates.map(function(dMs){
       if(!ppHasData)return null;
-      return getEffEntryForDay(dMs);
+      return effPickEntryForDay(ppEntries,dMs);
     });
     var projSeries2=projEntries2.map(function(e){return e?Math.round(e.eff*100)/100:null;});
     // 投影款號套用同一套合併規則，才不會跟歷史款號被畫成兩條不同的線
@@ -7569,13 +7703,16 @@ function renderEffTrendTab(){
 // histStyleSeries: {style: [v0,v1,...,vN]} — null=not in file that day, 0=on line but no output
 // colorMap: {style: color}
 // projSeries/projLabels/projStylePerDay: projected future data (colored dashed lines by style)
-function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels,projStylePerDay){
+/* dim（可省略）：{W,H,allLabels} — 整廠卡片要畫寬一點、而且每一天都要標日期，
+   所以把尺寸開成參數。不傳就是原本各組小卡的尺寸，行為完全不變。 */
+function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels,projStylePerDay,dim){
   projSeries=projSeries||[];
   projLabels=projLabels||[];
   projStylePerDay=projStylePerDay||[];
+  dim=dim||{};
   while(projSeries.length>0&&projSeries[projSeries.length-1]===null)projSeries.pop();
 
-  var W=264,H=68,PL=4,PR=projSeries.length?18:16,PT=10,PB=18;
+  var W=dim.W||264,H=dim.H||68,PL=4,PR=projSeries.length?18:16,PT=10,PB=18;
   var iW=W-PL-PR,iH=H-PT-PB;
   var styleKeys=Object.keys(histStyleSeries||{});
   var histN=(styleKeys.length&&histStyleSeries[styleKeys[0]])?histStyleSeries[styleKeys[0]].length:0;
@@ -7646,7 +7783,7 @@ function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels
         svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+col+'" stroke="#fff" stroke-width="1.2"/>';
       }
       // Date label (de-dup across styles)
-      if((i===0||isLast||histN<=4)&&!dateLabelSet[i]){
+      if((i===0||isLast||histN<=4||dim.allLabels)&&!dateLabelSet[i]){
         dateLabelSet[i]=true;
         svg+='<text x="'+cx+'" y="'+(H-2)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+escHtml(labels[i]||'')+'</text>';
       }
@@ -7688,7 +7825,14 @@ function buildEffSparkline(histStyleSeries,labels,colorMap,projSeries,projLabels
     var lpx2=px(histN+lastProjIdx),lpy2=py(lpv);
     var lpCol=projColor(lastProjIdx);
     svg+='<text x="'+(lpx2+(lpx2>W*0.75?-4:4))+'" y="'+(lpy2-5)+'" text-anchor="'+(lpx2>W*0.75?'end':'start')+'" font-size="8.5" fill="'+lpCol+'" font-style="italic">'+Math.round(lpv*100)+'%</text>';
-    svg+='<text x="'+px(histN+firstProjIdx)+'" y="'+(H-2)+'" text-anchor="middle" font-size="8" fill="#cbd5e1">'+escHtml(projLabels[firstProjIdx]||'')+'</text>';
+    if(dim.allLabels){
+      projSeries.forEach(function(v,pi){
+        if(v===null)return;
+        svg+='<text x="'+px(histN+pi)+'" y="'+(H-2)+'" text-anchor="middle" font-size="8" fill="#cbd5e1">'+escHtml(projLabels[pi]||'')+'</text>';
+      });
+    } else {
+      svg+='<text x="'+px(histN+firstProjIdx)+'" y="'+(H-2)+'" text-anchor="middle" font-size="8" fill="#cbd5e1">'+escHtml(projLabels[firstProjIdx]||'')+'</text>';
+    }
   }
 
   svg+='</svg>';
